@@ -78,6 +78,42 @@
   .contract{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between}
   .addrrow{display:flex;align-items:center;gap:9px;margin-top:5px}
   .addr{font-size:.82rem;color:var(--ink-2);word-break:break-all}
+  /* --------------------------------------------------------------- account */
+  .acct{display:inline-flex;align-items:center;gap:9px;padding:6px 8px 6px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line-2)}
+  .acct .dot{width:6px;height:6px;border-radius:50%;background:var(--yes);box-shadow:0 0 0 3px #2FD98A22}
+  .acct .bal{font-size:.85rem;font-weight:660;letter-spacing:-.01em}
+  .acct .bal i{font-style:normal;color:var(--mut);font-weight:500;font-size:.76rem;margin-left:2px}
+  .acct .adr{font-size:.76rem;color:var(--mut);border-left:1px solid var(--line-2);padding-left:9px}
+  .acct .out{background:none;border:0;color:var(--mut);font-size:.72rem;padding:2px 4px;border-radius:6px}
+  .acct .out:hover{color:var(--no)}
+
+  /* ---------------------------------------------------------------- toasts */
+  .toasts{position:fixed;right:18px;bottom:18px;z-index:60;display:flex;flex-direction:column;gap:9px;max-width:340px}
+  .toast{background:var(--surface-2);border:1px solid var(--line-2);border-left:3px solid var(--brand);border-radius:11px;padding:12px 14px;font-size:.85rem;color:var(--ink);box-shadow:0 18px 40px -18px #000;animation:tin .22s ease}
+  .toast.ok{border-left-color:var(--yes)} .toast.err{border-left-color:var(--no)} .toast.wait{border-left-color:var(--warn)}
+  .toast b{display:block;font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);font-weight:650;margin-bottom:3px}
+  @keyframes tin{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+  /* -------------------------------------------------------------- portfolio */
+  .port{background:linear-gradient(160deg,#6D5EF814,#2FD98A0A 70%);border:1px solid var(--line-2);border-radius:var(--r3);padding:20px;margin-bottom:18px}
+  .port h2{margin:0 0 14px;font-size:.78rem;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);font-weight:650}
+  .portgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+  @media(min-width:720px){.portgrid{grid-template-columns:repeat(4,1fr)}}
+  .pcell .k{font-size:.72rem;color:var(--mut);letter-spacing:.06em;text-transform:uppercase;font-weight:600}
+  .pcell .v{font-size:1.2rem;font-weight:690;letter-spacing:-.025em;margin-top:4px}
+  .pcell .v.g{color:var(--yes)}
+  .portrow{margin-top:16px;padding-top:14px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:8px}
+  .pitem{display:flex;align-items:center;gap:10px;font-size:.85rem;flex-wrap:wrap}
+  .pitem .id{color:var(--mut);font-size:.78rem}
+  .pitem .amt{color:var(--ink-2)}
+  .pitem .amt b{color:var(--yes)}
+
+  /* ------------------------------------------------------------- skeleton */
+  .skel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:20px}
+  .skel .l{height:11px;border-radius:6px;background:linear-gradient(90deg,#161922,#1E2330,#161922);background-size:200% 100%;animation:sh 1.3s linear infinite;margin-bottom:10px}
+  .skel .l.w40{width:40%} .skel .l.w70{width:70%} .skel .l.w90{width:90%}
+  @keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+
   .copy{background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink-2);border-radius:8px;padding:5px 11px;font-size:.76rem;font-weight:560}
   .copy:hover{color:var(--ink);background:var(--surface-3)}
   .who{margin-top:9px;font-size:.82rem;color:var(--ink-2);display:flex;align-items:center;gap:8px}
@@ -180,6 +216,12 @@
     </a>
     <div class="spacer"></div>
     <span class="pill"><span class="dot"></span><span id="net"></span></span>
+    <div id="acct" class="acct" hidden>
+      <span class="dot"></span>
+      <span class="bal"><span id="acctBal">—</span><i>GEN</i></span>
+      <span id="acctAddr" class="adr mono"></span>
+      <button id="btnOut" class="out" title="Disconnect">✕</button>
+    </div>
     <button id="btnConnect" class="btn-primary">Connect wallet</button>
   </div>
 </div>
@@ -201,6 +243,8 @@
     <div class="stat"><span class="micro">Evidence</span><b>the repo</b><div class="sub">no creator-chosen URL</div></div>
     <div class="stat"><span class="micro">Settlement</span><b>AI consensus</b><div class="sub">multi-validator, comparative</div></div>
   </div>
+
+  <div id="portfolio"></div>
 
   <div class="card">
     <div class="contract">
@@ -251,6 +295,8 @@
     <a id="explorer" href="#" target="_blank" rel="noopener"></a>
   </div>
 </div>
+
+<div class="toasts" id="toasts"></div>
 
 <script type="module">
 import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
@@ -342,8 +388,45 @@ function log(msg, hash, cls) {
   box.prepend(row);
 }
 
+// Transaction feedback a user can actually see, separate from the activity feed.
+function toast(title, body, kind) {
+  const t = document.createElement("div");
+  t.className = "toast" + (kind ? " " + kind : "");
+  t.innerHTML = "<b>" + esc(title) + "</b>" + esc(body);
+  el("toasts").appendChild(t);
+  setTimeout(() => t.remove(), kind === "wait" ? 30000 : 7000);
+  return t;
+}
+
 let client = createClient({ chain: chainFor(CFG) });
 let account = null;
+let balance = 0n;
+
+// The connected wallet's GEN. Read from the chain, refreshed after every write,
+// so the number on screen is never stale.
+async function refreshBalance() {
+  if (!account) return;
+  try {
+    balance = BigInt(await client.getBalance({ address: account }));
+    el("acctBal").textContent = fmtGen(balance);
+  } catch (e) {
+    el("acctBal").textContent = "—";
+  }
+}
+
+function showAccount() {
+  el("acct").hidden = !account;
+  el("btnConnect").hidden = !!account;
+  if (account) {
+    el("acctAddr").textContent = account.slice(0, 6) + "…" + account.slice(-4);
+    el("who").className = "who on";
+    el("who").innerHTML = '<span class="dot"></span><span>Connected — you can stake and claim.</span>';
+  } else {
+    el("who").className = "who";
+    el("who").innerHTML = '<span class="dot"></span><span>Not connected — browsing only.</span>';
+    el("portfolio").innerHTML = "";
+  }
+}
 
 el("addr").textContent = CFG.contract;
 el("net").textContent = CFG.label + " · " + CFG.chainId;
@@ -395,11 +478,10 @@ async function connect() {
   }
   // account MUST be an address string + provider, or writes sign with a local key
   client = createClient({ chain: chainFor(CFG), account, provider: window.ethereum });
-  el("who").className = "who on";
-  el("who").innerHTML = '<span class="dot"></span><span class="mono">' + esc(account.slice(0, 10) + "…" + account.slice(-6)) + " · " + esc(CFG.label) + "</span>";
-  el("btnConnect").textContent = "Connected";
-  el("btnConnect").disabled = true;
+  showAccount();
+  await refreshBalance();
   log("Wallet connected on " + CFG.label + ".");
+  toast("Wallet connected", CFG.label + " · " + account.slice(0, 6) + "…" + account.slice(-4), "ok");
   loadMarkets();
 }
 
@@ -437,7 +519,8 @@ const tagClass = (s) =>
   s === "OPEN" ? "t-open" : s === "RESOLVED" ? "t-resolved" : s === "VOID" ? "t-void" : "t-settled";
 
 async function loadMarkets() {
-  el("markets").innerHTML = '<div class="empty">Loading markets…</div>';
+  el("markets").innerHTML = '<div class="skel"><div class="l w40"></div><div class="l w90"></div><div class="l w70"></div></div>';
+  await refreshBalance();
   try {
     const count = Number(await client.readContract({ address: CFG.contract, functionName: "getCount", args: [] }));
     el("statCount").textContent = count || "0";
@@ -448,11 +531,20 @@ async function loadMarkets() {
     }
     let html = "";
     let total = 0;
+    const mine = [];
     for (let i = count; i >= 1; i--) {
       const id = "milestone-" + i;
       const m = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
       const pos = parsePositions(await client.readContract({ address: CFG.contract, functionName: "getPositions", args: [id] }));
       total += Number(m.pool) || 0;
+
+      // What this wallet holds in this market, and what it can take out now.
+      const myStake = pos.mine.YES + pos.mine.NO;
+      if (account && myStake > 0) {
+        let claimable = 0;
+        try { claimable = Number(await client.readContract({ address: CFG.contract, functionName: "previewPayout", args: [id, account] })); } catch (e) {}
+        mine.push({ id, status: m.status, outcome: m.outcome, myStake, claimable });
+      }
       const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
       const past = m.deadline > 0 && Date.now() / 1000 > m.deadline;
       const yes = pos.yes, no = pos.no, sum = yes + no;
@@ -522,6 +614,29 @@ async function loadMarkets() {
     }
     el("statPool").textContent = fmtGen(total) + " GEN";
     el("markets").innerHTML = html;
+
+    // Portfolio: what this wallet is exposed to, right now.
+    if (account && mine.length) {
+      const staked = mine.reduce((a, x) => a + x.myStake, 0);
+      const claimable = mine.reduce((a, x) => a + x.claimable, 0);
+      const open = mine.filter((x) => x.status === "OPEN").length;
+      let p = '<div class="port"><h2>Your position</h2><div class="portgrid">';
+      p += '<div class="pcell"><div class="k">Wallet</div><div class="v">' + fmtGen(balance) + ' <span style="font-size:.7em;color:var(--mut)">GEN</span></div></div>';
+      p += '<div class="pcell"><div class="k">Staked</div><div class="v">' + fmtGen(staked) + ' <span style="font-size:.7em;color:var(--mut)">GEN</span></div></div>';
+      p += '<div class="pcell"><div class="k">Claimable</div><div class="v' + (claimable > 0 ? " g" : "") + '">' + fmtGen(claimable) + ' <span style="font-size:.7em;color:var(--mut)">GEN</span></div></div>';
+      p += '<div class="pcell"><div class="k">Markets</div><div class="v">' + mine.length + ' <span style="font-size:.7em;color:var(--mut)">(' + open + ' open)</span></div></div>';
+      p += "</div><div class=\"portrow\">";
+      for (const x of mine) {
+        p += '<div class="pitem"><span class="id mono">' + esc(x.id) + "</span>";
+        p += '<span class="amt">staked ' + fmtGen(x.myStake) + " GEN</span>";
+        p += '<span class="amt">' + (x.claimable > 0 ? "claimable <b>" + fmtGen(x.claimable) + " GEN</b>" : esc(x.status) + (x.outcome ? " · " + esc(x.outcome) : "")) + "</span></div>";
+      }
+      p += "</div></div>";
+      el("portfolio").innerHTML = p;
+    } else if (account) {
+      el("portfolio").innerHTML = "";
+    }
+
     document.querySelectorAll("input.amt").forEach((inp) => paintOdds(inp.dataset.id));
   } catch (e) {
     el("markets").innerHTML = '<div class="empty">Read failed: ' + esc(e && e.message ? e.message : e) + "</div>";
@@ -567,16 +682,23 @@ function paintOdds(id) {
 
 // ------------------------------------------------------------------ writes
 async function write(fn, args, value = 0n) {
-  if (!account) { log("Connect a wallet first."); return null; }
+  if (!account) { toast("No wallet", "Connect a wallet to send transactions.", "err"); return null; }
+  const label = { stake: "Stake", createMarket: "Create market", resolve: "Resolve", settle: "Settle", claim: "Claim", void: "Void" }[fn] || fn;
   try {
     log("Sending " + fn + "…");
+    const t = toast(label + " submitted", "Waiting for the wallet signature and acceptance…", "wait");
     const hash = await client.writeContract({ address: CFG.contract, functionName: fn, args, value, gasLimit: GAS });
     log(fn + " sent", hash);
     const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
     log(fn + " status " + (rc && rc.status), hash);
+    t.remove();
+    toast(label + " accepted", "Transaction " + String(hash).slice(0, 10) + "… is on-chain.", "ok");
+    await refreshBalance();
     return rc;
   } catch (e) {
-    log(fn + " failed: " + (e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : e));
+    const msg = e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : String(e);
+    log(fn + " failed: " + msg);
+    toast(label + " failed", msg, "err");
     return null;
   }
 }
@@ -639,6 +761,14 @@ async function claimAndTrack(id) {
 // ------------------------------------------------------------------ events
 el("btnConnect").addEventListener("click", connect);
 el("btnRefresh").addEventListener("click", loadMarkets);
+el("btnOut").addEventListener("click", () => {
+  account = null;
+  balance = 0n;
+  client = createClient({ chain: chainFor(CFG) });
+  showAccount();
+  toast("Disconnected", "Wallet disconnected from this page.", "ok");
+  loadMarkets();
+});
 
 el("btnCreate").addEventListener("click", async () => {
   const repo = el("repo").value.trim();
