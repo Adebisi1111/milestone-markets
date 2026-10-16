@@ -84,7 +84,7 @@
   <div class="card"><label>Activity</label><div id="log" class="muted"><div>Idle.</div></div></div>
   <p class="foot">
     Reads via genlayer-js · Explorer:
-    <a href="https://explorer-bradbury.genlayer.com" target="_blank" rel="noopener">explorer-bradbury.genlayer.com</a>
+    <a id="explorer" href="#" target="_blank" rel="noopener"></a>
   </p>
 </div>
 
@@ -180,6 +180,8 @@ let account = null;
 
 el("addr").textContent = CFG.contract;
 el("net").textContent = CFG.label + " · chain " + CFG.chainId;
+el("explorer").href = CFG.explorer;
+el("explorer").textContent = CFG.explorer.replace(/^https?:\/\//, "");
 
 // ------------------------------------------------------------------ wallet
 // Writes must go through the wallet ON the right chain. Without this the wallet
@@ -311,7 +313,7 @@ async function loadMarkets() {
         }
         if (claimed === "1") {
           html += '<div class="row" style="margin-top:10px;"><span class="badge warn">CLAIMED</span>';
-          html += '<span class="muted" style="font-size:.82rem;">payout settles when the transaction finalizes (20 min – 2.4 h on Bradbury) — watch the explorer, not this page.</span></div>';
+          html += '<span class="muted" style="font-size:.82rem;">payout settles when the transaction finalizes (tens of minutes; measured 20 min – 2.4 h) — watch the explorer, not this page.</span></div>';
         } else {
           html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
           if (account) {
@@ -422,7 +424,7 @@ async function claimAndTrack(id) {
   try { before = BigInt(await client.getBalance({ address: account })); } catch (e) {}
   const rc = await write("claim", [id]);
   if (!rc) return;
-  log("Claim accepted. The payout is an external transfer and executes when the transaction FINALIZES — 20 min to 2.4 h on Bradbury. Watching your balance…", null, "prog");
+  log("Claim accepted. The payout is an external transfer and executes when the transaction FINALIZES — tens of minutes (measured 20 min to 2.4 h). Watching your balance…", null, "prog");
   await loadMarkets();
   for (let i = 1; i <= PAYOUT_POLLS; i++) {
     await sleep(PAYOUT_POLL_MS);
