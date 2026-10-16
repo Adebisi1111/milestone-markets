@@ -30,8 +30,14 @@
   .m h3 { margin:0 0 4px; font-size:1rem; word-break:break-word; }
   .meta { font-size:.82rem; color:var(--mut); word-break:break-all; }
   .reason { background:var(--bg); border-left:3px solid var(--acc); padding:8px 12px; border-radius:6px; margin-top:10px; font-size:.88rem; color:#c7d0dc; }
-  #log { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:220px; overflow:auto; }
+  .stake { margin-top:12px; padding-top:12px; border-top:1px dashed #26304a; }
+  .stake .row { align-items:flex-end; }
+  .stake input { max-width:180px; }
+  .odds { font-size:.85rem; color:#c7d0dc; margin-top:9px; line-height:1.6; }
+  .odds b { color:#4ade80; } .odds i { color:#f87171; font-style:normal; }
+  #log { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:240px; overflow:auto; }
   #log div { padding:3px 0; border-bottom:1px solid #1a2130; word-break:break-all; }
+  #log div.prog { color:#facc15; }
   a { color:#8ab4ff; word-break:break-all; }
   .foot { color:#6b7686; font-size:.8rem; margin-top:10px; }
 </style>
@@ -81,17 +87,32 @@
 </div>
 
 <script type="module">
-import { createClient, createAccount } from "https://esm.sh/genlayer-js@1.1.8";
+import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
 import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
 
 const CONTRACT = "0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c";
 const EXPLORER = "https://explorer-bradbury.genlayer.com/transaction/";
 const GAS = 5000000n;
 
+// Consensus is non-deterministic: any round can come back LEADER_TIMEOUT or
+// VALIDATORS_TIMEOUT before one reaches AGREE. Too small a budget orphans the
+// market, so we drive it properly and then keep polling for a late commit.
+const RESOLVE_ROUNDS = 12;
+const POLL_AFTER = 45;        // ~3 minutes of late-commit polling
+const POLL_EVERY_MS = 4000;
+
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-function log(msg, hash) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function fmtGen(wei) {
+  const n = Number(wei) / 1e18;
+  if (!isFinite(n) || n === 0) return "0";
+  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function log(msg, hash, cls) {
   const d = document.createElement("div");
+  if (cls) d.className = cls;
   d.innerHTML = esc(msg) + (hash ? ' — <a href="' + EXPLORER + esc(hash) + '" target="_blank" rel="noopener">' + esc(hash) + "</a>" : "");
   const box = el("log");
   if (box.firstChild && box.firstChild.textContent === "Idle.") box.innerHTML = "";
@@ -103,7 +124,7 @@ let account = null;
 
 el("addr").textContent = CONTRACT;
 
-// --- wallet: try accounts first so an already-connected user gets no popup ---
+// ------------------------------------------------------------------ wallet
 async function connect() {
   if (!window.ethereum) { log("No injected wallet found. Install a browser wallet to stake."); return; }
   let accts = await window.ethereum.request({ method: "eth_accounts" });
@@ -116,7 +137,7 @@ async function connect() {
   loadMarkets();
 }
 
-// --- reads ---
+// ------------------------------------------------------------------- reads
 function parseMarket(row) {
   const parts = String(row).split("|");
   return {
@@ -124,6 +145,21 @@ function parseMarket(row) {
     outcome: parts[3] || "", deadline: Number(parts[4] || 0), pool: parts[5] || "0",
     reasoning: parts.slice(6).join("|"),
   };
+}
+
+// positions look like "addr:SIDE:amount|addr:SIDE:amount"
+function parsePositions(pos) {
+  const out = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
+  for (const p of String(pos || "").split("|")) {
+    if (!p) continue;
+    const bits = p.split(":");
+    if (bits.length < 3) continue;
+    const who = bits[0], side = bits[1], amt = Number(bits[2]) || 0;
+    if (side === "YES") out.yes += amt;
+    else if (side === "NO") out.no += amt;
+    if (account && who.toLowerCase() === account.toLowerCase()) out.mine[side] += amt;
+  }
+  return out;
 }
 
 async function loadMarkets() {
@@ -135,63 +171,151 @@ async function loadMarkets() {
     for (let i = count; i >= 1; i--) {
       const id = "milestone-" + i;
       const m = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
+      const pos = parsePositions(await client.readContract({ address: CONTRACT, functionName: "getPositions", args: [id] }));
       const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : "ok";
       const ocls = m.outcome === "YES" ? "ok" : m.outcome === "NO" ? "no" : "dim";
       const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
-      html += '<div class="m">';
-      html += '<h3>' + esc(m.milestone || "(no criteria)") + "</h3>";
+      const past = m.deadline > 0 && Date.now() / 1000 > m.deadline;
+
+      html += '<div class="m" data-id="' + esc(id) + '" data-pools=\'' + JSON.stringify(pos) + "'>";
+      html += "<h3>" + esc(m.milestone || "(no criteria)") + "</h3>";
       html += '<div class="meta">' + esc(m.repo) + " · id " + esc(id) + " · deadline " + esc(when) + "</div>";
-      html += '<div class="row" style="margin-top:8px;">Status ' + '<span class="badge ' + cls + '">' + esc(m.status || "-") + "</span>";
-      html += "Outcome <span class=\"badge " + ocls + '">' + esc(m.outcome || "—") + "</span>";
-      html += '<span class="muted" style="font-size:.82rem;">pool ' + esc(m.pool) + " wei</span></div>";
+      html += '<div class="row" style="margin-top:8px;">Status <span class="badge ' + cls + '">' + esc(m.status || "-") + "</span>";
+      html += 'Outcome <span class="badge ' + ocls + '">' + esc(m.outcome || "—") + "</span>";
+      html += '<span class="muted" style="font-size:.82rem;">pool ' + fmtGen(m.pool) + " GEN · YES " + fmtGen(pos.yes) + " · NO " + fmtGen(pos.no) + "</span></div>";
       if (m.reasoning) html += '<div class="reason">' + esc(m.reasoning) + "</div>";
-      html += '<div class="row" style="margin-top:10px;">';
+
       if (m.status === "OPEN") {
-        html += '<button class="small" data-act="stake-yes" data-id="' + esc(id) + '">Stake YES</button>';
-        html += '<button class="small ghost" data-act="stake-no" data-id="' + esc(id) + '">Stake NO</button>';
-        html += '<button class="small ghost" data-act="resolve" data-id="' + esc(id) + '">Resolve (after deadline)</button>';
+        html += '<div class="stake">';
+        if (past) {
+          html += '<div class="row"><button class="small" data-act="resolve" data-id="' + esc(id) + '">Resolve now</button>';
+          html += '<span class="muted" style="font-size:.82rem;">Deadline passed — validators can judge the repo.</span></div>';
+        } else {
+          html += "<label>Stake amount (GEN)</label><div class=\"row\">";
+          html += '<input class="amt" data-id="' + esc(id) + '" type="number" min="0" step="0.001" value="1" />';
+          html += '<button class="small" data-act="stake-yes" data-id="' + esc(id) + '">Stake YES</button>';
+          html += '<button class="small ghost" data-act="stake-no" data-id="' + esc(id) + '">Stake NO</button>';
+          html += "</div>";
+          html += '<div class="odds" data-odds="' + esc(id) + '"></div>';
+        }
+        html += "</div>";
       } else if (m.status === "RESOLVED") {
-        html += '<button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button>';
+        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button></div>';
       } else {
-        html += '<button class="small" data-act="claim" data-id="' + esc(id) + '">Claim payout</button>';
+        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">Claim payout</button>';
         if (account) {
           const p = await client.readContract({ address: CONTRACT, functionName: "previewPayout", args: [id, account] });
-          html += '<span class="muted" style="font-size:.82rem;">your payout: ' + esc(p) + " wei</span>";
+          html += '<span class="muted" style="font-size:.82rem;">your payout: ' + fmtGen(p) + " GEN</span>";
         }
+        html += "</div>";
       }
-      html += "</div></div>";
+      html += "</div>";
     }
     el("markets").innerHTML = html;
+    document.querySelectorAll("input.amt").forEach((inp) => paintOdds(inp.dataset.id));
   } catch (e) {
     el("markets").innerHTML = '<div class="card">Read failed: ' + esc(e && e.message ? e.message : e) + "</div>";
   }
 }
 
-// --- writes ---
+// ------------------------------------------------------------- odds preview
+// Parimutuel: winners split the whole pool in proportion to their winning stake.
+function payoutIfWin(stake, sidePool, otherPool, mySideStake) {
+  const winningPool = sidePool + stake;
+  const total = sidePool + otherPool + stake;
+  if (winningPool <= 0) return 0;
+  return ((mySideStake + stake) * total) / winningPool;
+}
+
+function paintOdds(id) {
+  const box = document.querySelector('[data-odds="' + id + '"]');
+  const inp = document.querySelector('input.amt[data-id="' + id + '"]');
+  if (!box || !inp) return;
+  const node = inp.closest(".m");
+  if (!node) return;
+  let pools = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
+  try { pools = JSON.parse(node.dataset.pools || "{}"); } catch (e) {}
+  if (!pools.mine) pools.mine = { YES: 0, NO: 0 };
+
+  const gen = Number(inp.value || 0);
+  if (!isFinite(gen) || gen <= 0) { box.innerHTML = '<span class="muted">Enter an amount to see the payout.</span>'; return; }
+  const stake = gen * 1e18;
+
+  const yPayout = payoutIfWin(stake, pools.yes || 0, pools.no || 0, pools.mine.YES || 0);
+  const nPayout = payoutIfWin(stake, pools.no || 0, pools.yes || 0, pools.mine.NO || 0);
+  const yProfit = yPayout - ((pools.mine.YES || 0) + stake);
+  const nProfit = nPayout - ((pools.mine.NO || 0) + stake);
+  const roi = (v) => (stake > 0 ? Math.round((v / stake) * 100) : 0);
+
+  box.innerHTML =
+    "Stake " + fmtGen(stake) + " GEN → " +
+    "if <b>YES</b> wins: <b>+" + fmtGen(Math.max(0, yProfit)) + " GEN</b> (" + roi(Math.max(0, yProfit)) + "% ROI) · " +
+    "if NO wins: <i>-" + fmtGen(stake) + " GEN</i><br>" +
+    "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
+    "if <b>NO</b> wins: <b>+" + fmtGen(Math.max(0, nProfit)) + " GEN</b> (" + roi(Math.max(0, nProfit)) + "% ROI) · " +
+    "if YES wins: <i>-" + fmtGen(stake) + " GEN</i>";
+}
+
+// ------------------------------------------------------------------ writes
 async function write(fn, args, value = 0n) {
-  if (!account) { log("Connect a wallet first."); return; }
+  if (!account) { log("Connect a wallet first."); return null; }
   try {
     log("Sending " + fn + "…");
     const hash = await client.writeContract({ address: CONTRACT, functionName: fn, args, value, gasLimit: GAS });
     log(fn + " sent", hash);
     const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
     log(fn + " status " + (rc && rc.status), hash);
-    await loadMarkets();
+    return rc;
   } catch (e) {
     log(fn + " failed: " + (e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : e));
+    return null;
   }
 }
 
+// Drive consensus with a real retry budget, then poll for a late commit.
+async function resolveWithRetry(id) {
+  if (!account) { log("Connect a wallet first."); return; }
+  for (let round = 1; round <= RESOLVE_ROUNDS; round++) {
+    log("AI validators reaching consensus — round " + round + " of " + RESOLVE_ROUNDS + "…", null, "prog");
+    const rc = await write("resolve", [id]);
+    const row = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
+    if (row.outcome === "YES" || row.outcome === "NO") {
+      log("Resolved " + id + ": " + row.outcome, null, "prog");
+      await loadMarkets();
+      return;
+    }
+    if (rc && rc.status !== 5) await sleep(5000);
+  }
+  log("Consensus is unusually slow — the market is saved on-chain and still OPEN. Polling for a late commit…", null, "prog");
+  for (let i = 0; i < POLL_AFTER; i++) {
+    const row = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
+    if (row.outcome === "YES" || row.outcome === "NO") {
+      log("Late commit landed: " + id + " = " + row.outcome, null, "prog");
+      await loadMarkets();
+      return;
+    }
+    await sleep(POLL_EVERY_MS);
+  }
+  log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN.");
+  await loadMarkets();
+}
+
+// ------------------------------------------------------------------ events
 el("btnConnect").addEventListener("click", connect);
 el("btnRefresh").addEventListener("click", loadMarkets);
 
-el("btnCreate").addEventListener("click", () => {
+el("btnCreate").addEventListener("click", async () => {
   const repo = el("repo").value.trim();
   const milestone = el("milestone").value.trim();
   const dt = el("deadline").value;
   if (!repo || !milestone || !dt) { log("Repository, criteria and deadline are all required."); return; }
   const deadline = BigInt(Math.floor(new Date(dt).getTime() / 1000));
-  write("createMarket", [repo, milestone, deadline]);
+  await write("createMarket", [repo, milestone, deadline]);
+  await loadMarkets();
+});
+
+el("markets").addEventListener("input", (ev) => {
+  if (ev.target.classList && ev.target.classList.contains("amt")) paintOdds(ev.target.dataset.id);
 });
 
 el("markets").addEventListener("click", async (ev) => {
@@ -199,16 +323,20 @@ el("markets").addEventListener("click", async (ev) => {
   if (!btn) return;
   const id = btn.dataset.id;
   const act = btn.dataset.act;
+
   if (act === "stake-yes" || act === "stake-no") {
-    const amt = prompt("Amount to stake in wei:", "1000000000000000");
-    if (!amt) return;
+    const inp = document.querySelector('input.amt[data-id="' + id + '"]');
+    const gen = Number(inp && inp.value);
+    if (!gen || gen <= 0) { log("Enter a stake amount above zero."); return; }
     const side = act === "stake-yes" ? "YES" : "NO";
-    write("stake", [id, side], BigInt(amt));
+    btn.disabled = true;
+    await write("stake", [id, side], BigInt(Math.round(gen * 1e18)));
+    await loadMarkets();
     return;
   }
-  if (act === "resolve") return write("resolve", [id]);
-  if (act === "settle") return write("settle", [id]);
-  if (act === "claim") return write("claim", [id]);
+  if (act === "resolve") return resolveWithRetry(id);
+  if (act === "settle") { await write("settle", [id]); return loadMarkets(); }
+  if (act === "claim") { await write("claim", [id]); return loadMarkets(); }
 });
 
 loadMarkets();
