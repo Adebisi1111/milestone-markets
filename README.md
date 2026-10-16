@@ -146,6 +146,20 @@ GLPASS=<keystore-password> node deploy.mjs
 | Live app | https://adebisi1111.github.io/milestone-markets/ |
 | Repository | https://github.com/Adebisi1111/milestone-markets |
 
+**Deployed source == published source.** `genlayer-js getContractCode` on the
+address returns the contract source from the chain; its sha256 matches
+`contracts/milestone_market.py` in this repo:
+
+```
+on-chain sha256: e4786cda6c5f716b
+repo     sha256: e4786cda6c5f716b
+```
+
+Reads confirm live state: `getCount` = 3, `milestone-1` RESOLVED YES,
+`milestone-2` RESOLVED NO, `milestone-3` OPEN.
+
+The explorer path is `/address/` (verified 200); `/contract/` returns 404.
+
 Resolved on-chain, both directions, same repository — only the criteria differ:
 
 | Market | Criteria | Outcome | Tx |
