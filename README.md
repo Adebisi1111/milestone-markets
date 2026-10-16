@@ -266,3 +266,51 @@ here exposes no `estimateTransactionFees` / `createFeesDistribution`, and a plai
 (`0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575`) because the transaction carries no
 v0.6 fee distribution. That deploy has to be made from the Studio Next web UI,
 which builds the fee envelope client-side.
+
+## Launching on mainnet
+
+`index.html` has exactly one chain-specific block. To launch:
+
+1. set `NETWORK = "mainnet"`
+2. fill in the `mainnet` entry — `chainId`, `rpcUrl`, `explorer`, `contract`
+
+Nothing else in the file names a network, an RPC, an explorer or an address, so
+those two edits are the whole change.
+
+The SDK ships **no mainnet chain definition** (it exports only `localnet`,
+`studionet`, `testnetAsimov`, `testnetBradbury`), so `chainFor()` builds the
+target by `.extend()`-ing the Bradbury definition. `.extend()` keeps the
+consensus contract and its ABI — a hand-written `{ id, rpcUrls }` literal
+silently loses both, which is how the first Studio Next attempt failed.
+
+On connect the page switches (or adds) the chain in the wallet, so a user on the
+wrong network is corrected *before* they sign rather than signing a transaction
+into nothing.
+
+### Verify these before announcing
+
+| Check | Why it matters |
+|---|---|
+| **The fee envelope** | The one thing that has actually blocked a deploy here. `deployContract` to Studio Next reverts at the consensus contract because the tx carries no v0.6 fee distribution, and this `genlayer-js` build exposes no `estimateTransactionFees`. Confirm the mainnet fee path **from the UI** before launch — this is the highest-risk unknown. |
+| **GitHub rate limit** | `api.github.com` allows 60 requests/hour per IP unauthenticated and each `resolve` makes three, so ~20 resolves/hour per validator IP. Real volume needs a caching proxy or an authenticated mirror in front of the API. |
+| **Finalization timing** | Payouts execute on finalization — measured 20 min to 2.4 h on Bradbury. If mainnet differs, `PAYOUT_POLLS` and the UI copy should follow. |
+
+### Who pays to resolve
+
+`resolve` is permissionless, costs the caller gas, and consensus is the expensive
+part — and nobody is paid to call it. In practice the winning staker is the
+natural resolver: they need the market settled to claim, so they pay the three
+transactions and collect the pool. A market whose winners never act is still not
+lost — `void` refunds every staker once it is 30 days past the deadline. A
+production version would pay the resolver a cut of the pool.
+
+### What was proven, and how
+
+- **The payout moves real GEN.** Two distinct funded accounts, full lifecycle on
+  the deployed contract, `eth_getBalance` on both sides: contract 0.8 → 0.0 GEN,
+  winner 1.499777 → 2.299777 GEN. Both deltas exactly the payout.
+- **The frontend asks the wallet to sign.** Verified with a mock EIP-1193
+  provider injected before page load: `eth_sendTransaction` is requested, the
+  page does not navigate away, and there is no link to a Studio deploy UI.
+- **27 direct-mode tests**, with the two fund-safety guards mutation-checked.
+- **Deployed source == published source**, pinned by sha256.

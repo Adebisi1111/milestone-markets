@@ -55,8 +55,9 @@
   <div class="card">
     <div class="row" style="justify-content:space-between;">
       <div>
-        <div class="muted" style="font-size:.78rem;">Contract (Bradbury)</div>
+        <div class="muted" style="font-size:.78rem;">Contract</div>
         <div id="addr" class="meta"></div>
+        <div id="net" class="meta" style="margin-top:2px;"></div>
       </div>
       <div class="row">
         <button id="btnConnect" class="ghost">Connect wallet</button>
@@ -91,8 +92,58 @@
 import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
 import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
 
-const CONTRACT = "0x203F67178a7B25803854D179d72Bf40Cfcdc2c88";
-const EXPLORER = "https://explorer-bradbury.genlayer.com/transaction/";
+// ---------------------------------------------------------------------------
+// Everything chain-specific lives in this one block. To launch on mainnet, set
+// NETWORK = "mainnet" and fill in the mainnet entry -- nothing else in this file
+// refers to a network, an RPC, an explorer or a contract address directly.
+//
+// The SDK ships no mainnet chain definition (it exports only localnet, studionet,
+// testnetAsimov, testnetBradbury), so a non-Bradbury network is built by
+// extending the Bradbury definition -- .extend() keeps the consensus contract and
+// its ABI, which a hand-written { id, rpcUrls } literal would lose.
+// ---------------------------------------------------------------------------
+const NETWORKS = {
+  bradbury: {
+    label: "Bradbury testnet",
+    chainId: 4221,
+    rpcUrl: "https://rpc-bradbury.genlayer.com",
+    explorer: "https://explorer-bradbury.genlayer.com",
+    contract: "0x203F67178a7B25803854D179d72Bf40Cfcdc2c88",
+    nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  },
+  // mainnet: {
+  //   label: "GenLayer",
+  //   chainId: 0,                 // <- mainnet chain id
+  //   rpcUrl: "https://...",      // <- mainnet RPC
+  //   explorer: "https://...",    // <- mainnet explorer
+  //   contract: "0x...",          // <- the contract deployed on mainnet
+  //   nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  // },
+};
+const NETWORK = "bradbury";
+const CFG = NETWORKS[NETWORK];
+const EXPLORER = CFG.explorer + "/transaction/";
+
+// The SDK's own definition is preferred when it matches, because it carries the
+// consensus contract; otherwise extend Bradbury to the target chain.
+function chainFor(cfg) {
+  if (cfg.chainId === testnetBradbury.id) return testnetBradbury;
+  return testnetBradbury.extend({
+    id: cfg.chainId,
+    name: cfg.label,
+    rpcUrls: { default: { http: [cfg.rpcUrl] } },
+  });
+}
+
+// Payouts are EXTERNAL messages: they execute on FINALIZATION, not on acceptance.
+// Measured on Bradbury, finalization ran ~20 min to ~2.4 h, so the UI must never
+// present a submitted claim as failed -- it polls until the balance moves.
+const PAYOUT_POLLS = 40;          // 40 x 90s = ~1 hour of watching
+const PAYOUT_POLL_MS = 90000;
+
+// GenLayer has no gas estimation on its RPC, so every write carries an explicit
+// limit. Too low reverts with "intrinsic gas too low"; this is the value the
+// deploy and every write in the tests use.
 const GAS = 5000000n;
 
 // Consensus is non-deterministic: any round can come back LEADER_TIMEOUT or
@@ -124,21 +175,55 @@ function log(msg, hash, cls) {
   box.prepend(d);
 }
 
-let client = createClient({ chain: testnetBradbury });
+let client = createClient({ chain: chainFor(CFG) });
 let account = null;
 
-el("addr").textContent = CONTRACT;
+el("addr").textContent = CFG.contract;
+el("net").textContent = CFG.label + " · chain " + CFG.chainId;
 
 // ------------------------------------------------------------------ wallet
+// Writes must go through the wallet ON the right chain. Without this the wallet
+// signs against whatever network it happens to be on and the tx goes nowhere.
+async function ensureChain() {
+  const want = "0x" + CFG.chainId.toString(16);
+  const cur = await window.ethereum.request({ method: "eth_chainId" });
+  if (String(cur).toLowerCase() === want.toLowerCase()) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+  } catch (e) {
+    // 4902 = the wallet has never seen this chain; offer to add it.
+    if (e && (e.code === 4902 || e.code === -32603)) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: want,
+          chainName: CFG.label,
+          rpcUrls: [CFG.rpcUrl],
+          nativeCurrency: CFG.nativeCurrency,
+          blockExplorerUrls: [CFG.explorer],
+        }],
+      });
+    } else {
+      throw e;
+    }
+  }
+}
+
 async function connect() {
   if (!window.ethereum) { log("No injected wallet found. Install a browser wallet to stake."); return; }
   let accts = await window.ethereum.request({ method: "eth_accounts" });
   if (!accts || accts.length === 0) accts = await window.ethereum.request({ method: "eth_requestAccounts" });
   account = accts[0];
+  try {
+    await ensureChain();
+  } catch (e) {
+    log("Could not switch the wallet to " + CFG.label + ": " + (e && e.message ? e.message : e));
+    return;
+  }
   // account MUST be an address string + provider, or writes sign with a local key
-  client = createClient({ chain: testnetBradbury, account, provider: window.ethereum });
-  el("who").textContent = "Connected: " + account;
-  log("Wallet connected.");
+  client = createClient({ chain: chainFor(CFG), account, provider: window.ethereum });
+  el("who").textContent = "Connected: " + account + " on " + CFG.label;
+  log("Wallet connected on " + CFG.label + ".");
   loadMarkets();
 }
 
@@ -176,13 +261,13 @@ function parsePositions(pos) {
 async function loadMarkets() {
   el("markets").innerHTML = '<div class="card muted">Loading markets…</div>';
   try {
-    const count = Number(await client.readContract({ address: CONTRACT, functionName: "getCount", args: [] }));
+    const count = Number(await client.readContract({ address: CFG.contract, functionName: "getCount", args: [] }));
     if (!count) { el("markets").innerHTML = '<div class="card muted">No markets yet. Open the first one above.</div>'; return; }
     let html = "";
     for (let i = count; i >= 1; i--) {
       const id = "milestone-" + i;
-      const m = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
-      const pos = parsePositions(await client.readContract({ address: CONTRACT, functionName: "getPositions", args: [id] }));
+      const m = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+      const pos = parsePositions(await client.readContract({ address: CFG.contract, functionName: "getPositions", args: [id] }));
       const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : m.status === "VOID" ? "void" : "ok";
       const ocls = m.outcome === "YES" ? "ok" : m.outcome === "NO" ? "no" : "dim";
       const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
@@ -218,12 +303,23 @@ async function loadMarkets() {
         html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button></div>';
       } else {
         const isVoid = m.status === "VOID";
-        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
+        // A claim that has been made is NOT a payout that has arrived: the GEN
+        // rides an external transfer that only executes on finalization.
+        let claimed = "0";
         if (account) {
-          const p = await client.readContract({ address: CONTRACT, functionName: "previewPayout", args: [id, account] });
-          html += '<span class="muted" style="font-size:.82rem;">' + (isVoid ? "refund" : "your payout") + ": " + fmtGen(p) + " GEN</span>";
+          try { claimed = String(await client.readContract({ address: CFG.contract, functionName: "isClaimed", args: [id, account] })); } catch (e) {}
         }
-        html += "</div>";
+        if (claimed === "1") {
+          html += '<div class="row" style="margin-top:10px;"><span class="badge warn">CLAIMED</span>';
+          html += '<span class="muted" style="font-size:.82rem;">payout settles when the transaction finalizes (20 min – 2.4 h on Bradbury) — watch the explorer, not this page.</span></div>';
+        } else {
+          html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
+          if (account) {
+            const p = await client.readContract({ address: CFG.contract, functionName: "previewPayout", args: [id, account] });
+            html += '<span class="muted" style="font-size:.82rem;">' + (isVoid ? "refund" : "your payout") + ": " + fmtGen(p) + " GEN</span>";
+          }
+          html += "</div>";
+        }
       }
       html += "</div>";
     }
@@ -277,7 +373,7 @@ async function write(fn, args, value = 0n) {
   if (!account) { log("Connect a wallet first."); return null; }
   try {
     log("Sending " + fn + "…");
-    const hash = await client.writeContract({ address: CONTRACT, functionName: fn, args, value, gasLimit: GAS });
+    const hash = await client.writeContract({ address: CFG.contract, functionName: fn, args, value, gasLimit: GAS });
     log(fn + " sent", hash);
     const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
     log(fn + " status " + (rc && rc.status), hash);
@@ -294,7 +390,7 @@ async function resolveWithRetry(id) {
   for (let round = 1; round <= RESOLVE_ROUNDS; round++) {
     log("AI validators reaching consensus — round " + round + " of " + RESOLVE_ROUNDS + "…", null, "prog");
     const rc = await write("resolve", [id]);
-    const row = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
+    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
     if (row.outcome === "YES" || row.outcome === "NO") {
       log("Resolved " + id + ": " + row.outcome, null, "prog");
       await loadMarkets();
@@ -304,7 +400,7 @@ async function resolveWithRetry(id) {
   }
   log("Consensus is unusually slow — the market is saved on-chain and still OPEN. Polling for a late commit…", null, "prog");
   for (let i = 0; i < POLL_AFTER; i++) {
-    const row = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
+    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
     if (row.outcome === "YES" || row.outcome === "NO") {
       log("Late commit landed: " + id + " = " + row.outcome, null, "prog");
       await loadMarkets();
@@ -313,6 +409,33 @@ async function resolveWithRetry(id) {
     await sleep(POLL_EVERY_MS);
   }
   log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN, and once it is " + VOID_GRACE_DAYS + " days past the deadline anyone can void it for a full refund.");
+  await loadMarkets();
+}
+
+// A claim is an EXTERNAL message: the GEN does not move when the transaction is
+// accepted, only when it FINALIZES (measured 20 min to 2.4 h on Bradbury). So a
+// submitted claim is never reported as a failure -- the UI watches the wallet
+// balance until the payout actually lands.
+async function claimAndTrack(id) {
+  if (!account) { log("Connect a wallet first."); return; }
+  let before = 0n;
+  try { before = BigInt(await client.getBalance({ address: account })); } catch (e) {}
+  const rc = await write("claim", [id]);
+  if (!rc) return;
+  log("Claim accepted. The payout is an external transfer and executes when the transaction FINALIZES — 20 min to 2.4 h on Bradbury. Watching your balance…", null, "prog");
+  await loadMarkets();
+  for (let i = 1; i <= PAYOUT_POLLS; i++) {
+    await sleep(PAYOUT_POLL_MS);
+    let now = before;
+    try { now = BigInt(await client.getBalance({ address: account })); } catch (e) {}
+    if (now > before) {
+      log("Payout landed: +" + fmtGen(now - before) + " GEN", null, "prog");
+      await loadMarkets();
+      return;
+    }
+    if (i % 4 === 0) log("Still waiting for finalization (" + Math.round((i * PAYOUT_POLL_MS) / 60000) + " min)…", null, "prog");
+  }
+  log("Not finalized after ~1 h. Nothing is lost — the transfer is queued and executes on finalization; check the explorer for the claim transaction.", null, "prog");
   await loadMarkets();
 }
 
@@ -352,7 +475,7 @@ el("markets").addEventListener("click", async (ev) => {
   }
   if (act === "resolve") return resolveWithRetry(id);
   if (act === "settle") { await write("settle", [id]); return loadMarkets(); }
-  if (act === "claim") { await write("claim", [id]); return loadMarkets(); }
+  if (act === "claim") { await claimAndTrack(id); return; }
   if (act === "void") { await write("void", [id]); return loadMarkets(); }
 });
 
