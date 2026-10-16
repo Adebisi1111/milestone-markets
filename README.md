@@ -4,8 +4,8 @@ Prediction markets on **open-source delivery**.
 
 Users bet YES or NO on whether a named repository ships a milestone by a
 deadline. There is no human judge and no oracle: GenLayer's AI validators read
-the repository's own commits and pull requests and decide whether the criteria
-were met — then winners are paid automatically.
+the repository's own commits, pull requests and file tree and decide whether
+the criteria were met — then winners are paid automatically.
 
 ## Why GenLayer
 
@@ -20,7 +20,7 @@ The important property is what the validators read. Nobody chooses the evidence:
 | | A market resolved from a cited URL | MilestoneMarkets |
 |---|---|---|
 | Who picks the evidence | the market creator | nobody — the contract builds the GitHub URLs from the repo name |
-| What the validators see | whatever the creator pointed at | the repository's commits and pull requests |
+| What the validators see | whatever the creator pointed at | the repository's commits, pull requests and files |
 | Trust assumption | the creator chose an honest source | the repository is the source |
 
 There is no method on the contract that accepts a URL. `createMarket` takes a
@@ -33,12 +33,19 @@ repository (`owner/name`), the milestone criteria, and a deadline.
 2. **`stake(marketId, side)`** — send GEN on `YES` or `NO`. Staking closes when
    the deadline passes.
 3. **`resolve(marketId)`** — after the deadline, every validator independently
-   fetches `api.github.com/repos/<repo>/commits` and `/pulls`, runs the
-   evaluator prompt below against the milestone criteria, and agrees through
-   `gl.eq_principle.prompt_comparative`. If they cannot agree, the market stays
-   `OPEN` rather than guessing.
-4. **`settle(marketId)`** — lock the outcome.
+   fetches `api.github.com/repos/<repo>/commits`, `/pulls` and the file tree,
+   runs the evaluator prompt below against the milestone criteria, and agrees
+   through `gl.eq_principle.prompt_comparative`. If they cannot agree, the market
+   stays `OPEN` rather than guessing.
+4. **`settle(marketId)`** — lock the outcome. If the winning side drew no stake,
+   the market is `VOID` instead, so nobody's GEN is stranded.
 5. **`claim(marketId)`** — the winner pulls their parimutuel share in native GEN.
+6. **`void(marketId)`** — once a market is 30 days past its deadline and still
+   unresolved, anyone can void it and every staker takes their own stake back.
+
+**Every market reaches a state where staker GEN comes back out.** There is no
+path — no winning staker, no agreeing validators — that locks funds in the
+contract forever.
 
 ## The evaluator prompt
 
@@ -105,22 +112,39 @@ validator compares dates rather than assuming.
   pinned to the transaction datetime and is identical across validators, so
   `int(datetime.now(timezone.utc).timestamp())` is deterministic and safe for a
   deadline comparison.
+- **Views return JSON, not delimited strings.** The criteria is stored
+  verbatim, so a `|` inside it would shift every later field of a `|`-delimited
+  read and make the UI render the wrong state. `getMarket` returns JSON.
 
 ## Tests
 
-16 direct-mode tests, no network and no chain — the GitHub API and the LLM are
-mocked and the clock is warped with `direct_vm.warp(...)` so the deadline can be
+25 direct-mode tests, no network and no chain — the GitHub API and the LLM are
+mocked and the clock is warped with `direct_vm.warp(...)` so deadlines can be
 crossed inside a test.
 
 ```bash
 python3 -m pytest tests/direct -q
-# 16 passed
+# 25 passed
 ```
 
 Covered: creation validation, staking both sides, bad side, zero value, staking
 after the deadline, resolve before the deadline, resolve YES, resolve NO,
-resolve is not repeatable, parimutuel payout math, loser cannot claim,
-double-claim rejected, claim before settlement rejected.
+resolve is not repeatable, the caller supplies no evidence source, parimutuel
+payout math, loser cannot claim, double-claim rejected, claim before settlement
+rejected — plus three fund-safety cases:
+
+- **No winning staker.** Outcome YES with only NO backed: `settle` returns
+  `VOID` and the NO staker gets their stake back. Paying nobody would otherwise
+  hold it forever.
+- **Unresolved market.** 30 days past the deadline and still `OPEN`: anyone can
+  `void` it and every staker is refunded. Inside the grace window it is not
+  voidable, and a resolved market can never be voided — so a creator cannot dodge
+  a verdict they dislike.
+- **Separator in the criteria.** `Ship A | B | C` no longer shifts the other
+  fields of a read.
+
+The fund-safety tests are mutation-checked: removing the `VOID` branch in
+`settle` turns `test_no_winning_stake_voids_instead_of_stranding_funds` red.
 
 ## Known limitation
 
@@ -140,9 +164,9 @@ GLPASS=<keystore-password> node deploy.mjs
 
 | | |
 |---|---|
-| Contract (Bradbury, chain 4221) | `0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c` |
-| Explorer | https://explorer-bradbury.genlayer.com/address/0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c |
-| Deploy tx | `0x870da42a1c8aae414a1d813e61df52fb7f20460545af394b240d114ad3ed2b26` |
+| Contract (Bradbury, chain 4221) | `0x6b159262924276546A10Ed83A81c3caDb0E2D327` |
+| Explorer | https://explorer-bradbury.genlayer.com/address/0x6b159262924276546A10Ed83A81c3caDb0E2D327 |
+| Deploy tx | `0x335ce79f24f182f9eddc1302f3e77a8d7dc6452dd284c7fd0b745cce853d0fa2` |
 | Live app | https://adebisi1111.github.io/milestone-markets/ |
 | Repository | https://github.com/Adebisi1111/milestone-markets |
 
@@ -151,16 +175,17 @@ address returns the contract source from the chain; its sha256 matches
 `contracts/milestone_market.py` in this repo:
 
 ```
-on-chain sha256: e4786cda6c5f716b
-repo     sha256: e4786cda6c5f716b
+on-chain sha256: c0579c81e8c68212
+repo     sha256: c0579c81e8c68212
 ```
 
-Reads confirm live state: `getCount` = 3, `milestone-1` RESOLVED YES,
-`milestone-2` RESOLVED NO, `milestone-3` OPEN.
+Reads confirm live state: `getCount` = 1, `milestone-1` `OPEN`, deadline
+`2026-10-19 09:04 UTC` on `genlayerlabs/genlayer-js`.
 
 The explorer path is `/address/` (verified 200); `/contract/` returns 404.
 
-Resolved on-chain, both directions, same repository — only the criteria differ:
+The two-direction live proof (YES and NO) was produced on the previous
+contract deploy, which this one supersedes:
 
 | Market | Criteria | Outcome | Tx |
 |---|---|---|---|
@@ -173,4 +198,3 @@ here exposes no `estimateTransactionFees` / `createFeesDistribution`, and a plai
 (`0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575`) because the transaction carries no
 v0.6 fee distribution. That deploy has to be made from the Studio Next web UI,
 which builds the fee envelope client-side.
-

@@ -20,12 +20,22 @@ Payout is parimutuel; winners are paid native GEN. Paying an EOA is an EXTERNAL
 message, so it goes through the EVM interface (the ghost contract) —
 `gl.get_contract_at(wallet).emit_transfer()` is IC->IC only and silently moves
 nothing.
+
+Fund safety: every market can always reach a state where stakers get their GEN
+back. Two paths guarantee it — `settle` voids a market whose winning side drew
+no stake, and `void` releases a market the validators never managed to resolve.
+Neither path can be triggered by a creator to escape a verdict they dislike.
 """
 
 import json
 from datetime import datetime, timezone
 
 from genlayer import *
+
+# How long after the deadline a market may sit unresolved before anyone can
+# void it and refund the stakers. Without this, a market the validators never
+# agree on holds every stake forever.
+VOID_GRACE_SECONDS = 30 * 24 * 3600
 
 
 @gl.evm.contract_interface
@@ -114,7 +124,7 @@ class MilestoneMarkets(gl.Contract):
     m_repo: TreeMap[str, str]
     m_milestone: TreeMap[str, str]
     m_deadline: TreeMap[str, u256]
-    m_status: TreeMap[str, str]      # OPEN | RESOLVED | SETTLED
+    m_status: TreeMap[str, str]      # OPEN | RESOLVED | SETTLED | VOID
     m_outcome: TreeMap[str, str]     # "" | YES | NO
     m_reasoning: TreeMap[str, str]
     m_pool: TreeMap[str, u256]
@@ -135,6 +145,9 @@ class MilestoneMarkets(gl.Contract):
             raise gl.vm.UserError("Repository must be owner/name")
         if not milestone:
             raise gl.vm.UserError("Milestone criteria required")
+        # The criteria is the text the validators judge, so it is stored
+        # verbatim rather than sanitised. Views return JSON, not a delimited
+        # string, so a separator character in it cannot corrupt a read.
         if int(deadline) <= _now():
             raise gl.vm.UserError("Deadline must be in the future")
 
@@ -273,28 +286,88 @@ class MilestoneMarkets(gl.Contract):
         return decided
 
     @gl.public.write
-    def settle(self, market_id: str) -> None:
-        """Lock the resolved outcome so claims can open."""
+    def settle(self, market_id: str) -> str:
+        """Lock the outcome so claims can open.
+
+        If the winning side drew no stake there is nobody to pay, and paying
+        nobody would strand the losing side's GEN in this contract forever. In
+        that case the market is VOIDed instead, so every staker can take their
+        own stake back.
+        """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
         if self.m_status.get(market_id, "") != "RESOLVED":
             raise gl.vm.UserError("Not resolved")
+        if self._pool_for(market_id, self.m_outcome.get(market_id, "")) <= 0:
+            self.m_status[market_id] = "VOID"
+            return "VOID"
         self.m_status[market_id] = "SETTLED"
+        return "SETTLED"
+
+    @gl.public.write
+    def void(self, market_id: str) -> str:
+        """Release a market the validators never resolved, and refund the stakers.
+
+        Only reachable once the deadline is VOID_GRACE_SECONDS past and the
+        market is still OPEN. It cannot be used to escape a verdict: a resolved
+        market is not OPEN, and the creator cannot call this early to dodge a
+        losing outcome.
+        """
+        if self.m_creator.get(market_id, None) is None:
+            raise gl.vm.UserError("Market not found")
+        if self.m_status.get(market_id, "") != "OPEN":
+            raise gl.vm.UserError("Not open")
+        if _now() <= int(self.m_deadline.get(market_id, u256(0))) + VOID_GRACE_SECONDS:
+            raise gl.vm.UserError("Grace period has not passed")
+        self.m_status[market_id] = "VOID"
+        return "VOID"
 
     # ---------------------------------------------------------------- the payout
 
-    def _payout_for(self, market_id: str, who: str) -> int:
-        """Parimutuel: winning_stake * total_pool // winning_pool."""
-        outcome = self.m_outcome.get(market_id, "")
-        total_pool = int(self.m_pool.get(market_id, u256(0)))
-        user_stake = 0
-        winning_pool = 0
+    def _entries(self, market_id: str) -> list:
+        out = []
         for p in self.m_positions.get(market_id, "").split("|"):
             if not p:
                 continue
             pp = p.split(":")
             if len(pp) < 3:
                 continue
+            out.append(pp)
+        return out
+
+    def _pool_for(self, market_id: str, side: str) -> int:
+        total = 0
+        for pp in self._entries(market_id):
+            if pp[1] == side:
+                total += int(pp[2])
+        return total
+
+    def _stake_of(self, market_id: str, who: str) -> int:
+        """Everything this wallet put in, on either side. Used for refunds."""
+        total = 0
+        for pp in self._entries(market_id):
+            if pp[0] == who:
+                total += int(pp[2])
+        return total
+
+    def _payout_for(self, market_id: str, who: str) -> int:
+        """What this wallet can take out right now, for the market's state.
+
+        SETTLED -> parimutuel share: winning_stake * total_pool // winning_pool.
+        VOID    -> its own stake back, both sides summed.
+        anything else -> nothing is claimable yet.
+        """
+        status = self.m_status.get(market_id, "")
+        if status == "VOID":
+            return self._stake_of(market_id, who)
+        if status != "SETTLED":
+            return 0
+
+        outcome = self.m_outcome.get(market_id, "")
+        total_pool = int(self.m_pool.get(market_id, u256(0)))
+        user_stake = 0
+        winning_pool = 0
+        for pp in self._entries(market_id):
             if pp[1] == outcome:
                 # Accumulate every entry -- a wallet may stake many times.
                 winning_pool += int(pp[2])
@@ -306,10 +379,10 @@ class MilestoneMarkets(gl.Contract):
 
     @gl.public.write
     def claim(self, market_id: str) -> u256:
-        """Pay the winner their parimutuel share in native GEN, once."""
+        """Pay the winner their parimutuel share, or a staker their refund, once."""
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
-        if self.m_status.get(market_id, "") != "SETTLED":
+        if self.m_status.get(market_id, "") not in ("SETTLED", "VOID"):
             raise gl.vm.UserError("Not settled")
         sender = gl.message.sender_address.as_hex
         key = f"{market_id}:{sender}"
@@ -317,7 +390,7 @@ class MilestoneMarkets(gl.Contract):
             raise gl.vm.UserError("Already claimed")
         payout = self._payout_for(market_id, sender)
         if payout <= 0:
-            raise gl.vm.UserError("No winning stake")
+            raise gl.vm.UserError("Nothing to claim")
         # Mark before transferring; a failed external message reverts the whole call.
         self.m_positions[key] = "1"
         _Payee(gl.message.sender_address).emit_transfer(value=u256(payout))
@@ -327,16 +400,29 @@ class MilestoneMarkets(gl.Contract):
 
     @gl.public.view
     def getMarket(self, market_id: str) -> str:
+        """The whole row as JSON.
+
+        JSON rather than a delimited string: the milestone criteria is stored
+        verbatim, so a separator character inside it would shift every field of
+        a delimited read and make the UI render the wrong state.
+        """
         if self.m_creator.get(market_id, None) is None:
-            return "NOT_FOUND"
-        return (
-            f"{self.m_repo.get(market_id, '')}"
-            f"|{self.m_milestone.get(market_id, '')}"
-            f"|{self.m_status.get(market_id, '')}"
-            f"|{self.m_outcome.get(market_id, '')}"
-            f"|{int(self.m_deadline.get(market_id, u256(0)))}"
-            f"|{int(self.m_pool.get(market_id, u256(0)))}"
-            f"|{self.m_reasoning.get(market_id, '')}"
+            return json.dumps({"exists": False})
+        return json.dumps(
+            {
+                "exists": True,
+                "id": market_id,
+                "creator": self.m_creator.get(market_id, ""),
+                "repo": self.m_repo.get(market_id, ""),
+                "milestone": self.m_milestone.get(market_id, ""),
+                "status": self.m_status.get(market_id, ""),
+                "outcome": self.m_outcome.get(market_id, ""),
+                "deadline": int(self.m_deadline.get(market_id, u256(0))),
+                "pool": int(self.m_pool.get(market_id, u256(0))),
+                "yes_pool": self._pool_for(market_id, "YES"),
+                "no_pool": self._pool_for(market_id, "NO"),
+                "reasoning": self.m_reasoning.get(market_id, ""),
+            }
         )
 
     @gl.public.view
@@ -353,13 +439,17 @@ class MilestoneMarkets(gl.Contract):
 
     @gl.public.view
     def previewPayout(self, market_id: str, user: str) -> str:
-        if self.m_status.get(market_id, "") != "SETTLED":
-            return "0"
+        """What this wallet can take out now: parimutuel share, or a refund."""
         return str(self._payout_for(market_id, user))
 
     @gl.public.view
     def getPositions(self, market_id: str) -> str:
         return self.m_positions.get(market_id, "")
+
+    @gl.public.view
+    def getStake(self, market_id: str, user: str) -> str:
+        """Everything this wallet has put into the market, both sides summed."""
+        return str(self._stake_of(market_id, user))
 
     @gl.public.view
     def now(self) -> str:

@@ -26,6 +26,7 @@
   .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.78rem; font-weight:700; }
   .ok { background:#10391f; color:#4ade80; } .no { background:#3a1414; color:#f87171; }
   .warn { background:#3a2f10; color:#facc15; } .dim { background:#1c2432; color:var(--mut); }
+  .void { background:#2a1a3a; color:#c084fc; }
   .m { border:1px solid var(--line); border-radius:12px; padding:14px; background:#0f1420; margin-bottom:12px; }
   .m h3 { margin:0 0 4px; font-size:1rem; word-break:break-word; }
   .meta { font-size:.82rem; color:var(--mut); word-break:break-all; }
@@ -90,7 +91,7 @@
 import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
 import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
 
-const CONTRACT = "0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c";
+const CONTRACT = "0x6b159262924276546A10Ed83A81c3caDb0E2D327";
 const EXPLORER = "https://explorer-bradbury.genlayer.com/transaction/";
 const GAS = 5000000n;
 
@@ -100,6 +101,10 @@ const GAS = 5000000n;
 const RESOLVE_ROUNDS = 12;
 const POLL_AFTER = 45;        // ~3 minutes of late-commit polling
 const POLL_EVERY_MS = 4000;
+// A market the validators never resolve can be voided once the deadline is
+// this far past, so staker GEN is never held forever.
+const VOID_GRACE_DAYS = 30;
+const VOID_GRACE = VOID_GRACE_DAYS * 24 * 3600;
 
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -138,12 +143,18 @@ async function connect() {
 }
 
 // ------------------------------------------------------------------- reads
+// getMarket returns JSON, not a delimited string: the criteria is stored
+// verbatim, so a separator character inside it must not shift the other fields.
 function parseMarket(row) {
-  const parts = String(row).split("|");
+  let o = {};
+  try { o = typeof row === "string" ? JSON.parse(row) : (row || {}); } catch (e) { o = {}; }
+  if (!o.exists) return { exists: false };
   return {
-    repo: parts[0] || "", milestone: parts[1] || "", status: parts[2] || "",
-    outcome: parts[3] || "", deadline: Number(parts[4] || 0), pool: parts[5] || "0",
-    reasoning: parts.slice(6).join("|"),
+    repo: o.repo || "", milestone: o.milestone || "", status: o.status || "",
+    outcome: o.outcome || "", deadline: Number(o.deadline || 0),
+    pool: o.pool != null ? String(o.pool) : "0",
+    reasoning: o.reasoning || "",
+    yesPool: Number(o.yes_pool || 0), noPool: Number(o.no_pool || 0),
   };
 }
 
@@ -172,7 +183,7 @@ async function loadMarkets() {
       const id = "milestone-" + i;
       const m = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
       const pos = parsePositions(await client.readContract({ address: CONTRACT, functionName: "getPositions", args: [id] }));
-      const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : "ok";
+      const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : m.status === "VOID" ? "void" : "ok";
       const ocls = m.outcome === "YES" ? "ok" : m.outcome === "NO" ? "no" : "dim";
       const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
       const past = m.deadline > 0 && Date.now() / 1000 > m.deadline;
@@ -190,6 +201,10 @@ async function loadMarkets() {
         if (past) {
           html += '<div class="row"><button class="small" data-act="resolve" data-id="' + esc(id) + '">Resolve now</button>';
           html += '<span class="muted" style="font-size:.82rem;">Deadline passed — validators can judge the repo.</span></div>';
+          if (m.deadline > 0 && Date.now() / 1000 > m.deadline + VOID_GRACE) {
+            html += '<div class="row" style="margin-top:8px;"><button class="small ghost" data-act="void" data-id="' + esc(id) + '">Void &amp; refund</button>';
+            html += '<span class="muted" style="font-size:.82rem;">Unresolved ' + VOID_GRACE_DAYS + ' days past the deadline — everyone takes their stake back.</span></div>';
+          }
         } else {
           html += "<label>Stake amount (GEN)</label><div class=\"row\">";
           html += '<input class="amt" data-id="' + esc(id) + '" type="number" min="0" step="0.001" value="1" />';
@@ -202,10 +217,11 @@ async function loadMarkets() {
       } else if (m.status === "RESOLVED") {
         html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button></div>';
       } else {
-        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">Claim payout</button>';
+        const isVoid = m.status === "VOID";
+        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
         if (account) {
           const p = await client.readContract({ address: CONTRACT, functionName: "previewPayout", args: [id, account] });
-          html += '<span class="muted" style="font-size:.82rem;">your payout: ' + fmtGen(p) + " GEN</span>";
+          html += '<span class="muted" style="font-size:.82rem;">' + (isVoid ? "refund" : "your payout") + ": " + fmtGen(p) + " GEN</span>";
         }
         html += "</div>";
       }
@@ -296,7 +312,7 @@ async function resolveWithRetry(id) {
     }
     await sleep(POLL_EVERY_MS);
   }
-  log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN.");
+  log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN, and once it is " + VOID_GRACE_DAYS + " days past the deadline anyone can void it for a full refund.");
   await loadMarkets();
 }
 
@@ -337,6 +353,7 @@ el("markets").addEventListener("click", async (ev) => {
   if (act === "resolve") return resolveWithRetry(id);
   if (act === "settle") { await write("settle", [id]); return loadMarkets(); }
   if (act === "claim") { await write("claim", [id]); return loadMarkets(); }
+  if (act === "void") { await write("void", [id]); return loadMarkets(); }
 });
 
 loadMarkets();
