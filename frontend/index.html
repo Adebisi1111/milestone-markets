@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MilestoneMarkets — bet on open-source delivery</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0e14; --card:#131824; --line:#222a3a; --ink:#e8ecf1; --mut:#9aa4b2; --acc:#4c7dff; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); margin:0; padding:20px; line-height:1.5; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  .sub { color:var(--mut); margin:0 0 18px; font-size:.94rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  label { font-size:.78rem; color:var(--mut); display:block; margin:0 0 5px; }
+  input, select { width:100%; background:var(--bg); border:1px solid #2a3346; color:var(--ink); border-radius:10px; padding:10px 12px; font-size:.95rem; }
+  .grid { display:grid; gap:10px; grid-template-columns:1fr; }
+  @media (min-width:640px){ .grid.two { grid-template-columns:1fr 1fr; } }
+  button { background:var(--acc); color:#fff; border:0; border-radius:10px; padding:10px 16px; font-weight:600; cursor:pointer; font-size:.92rem; }
+  button:hover { background:#3a6bf0; }
+  button.ghost { background:#1c2432; color:var(--ink); }
+  button.small { padding:7px 12px; font-size:.85rem; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .muted { color:var(--mut); }
+  .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.78rem; font-weight:700; }
+  .ok { background:#10391f; color:#4ade80; } .no { background:#3a1414; color:#f87171; }
+  .warn { background:#3a2f10; color:#facc15; } .dim { background:#1c2432; color:var(--mut); }
+  .m { border:1px solid var(--line); border-radius:12px; padding:14px; background:#0f1420; margin-bottom:12px; }
+  .m h3 { margin:0 0 4px; font-size:1rem; word-break:break-word; }
+  .meta { font-size:.82rem; color:var(--mut); word-break:break-all; }
+  .reason { background:var(--bg); border-left:3px solid var(--acc); padding:8px 12px; border-radius:6px; margin-top:10px; font-size:.88rem; color:#c7d0dc; }
+  #log { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:220px; overflow:auto; }
+  #log div { padding:3px 0; border-bottom:1px solid #1a2130; word-break:break-all; }
+  a { color:#8ab4ff; word-break:break-all; }
+  .foot { color:#6b7686; font-size:.8rem; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MilestoneMarkets</h1>
+  <p class="sub">
+    Bet YES or NO on whether a repository ships a milestone by a deadline.
+    GenLayer's AI validators read the repo's own commits, pull requests and files to decide —
+    nobody picks the evidence, not even the market creator.
+  </p>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div class="muted" style="font-size:.78rem;">Contract (Bradbury)</div>
+        <div id="addr" class="meta"></div>
+      </div>
+      <div class="row">
+        <button id="btnConnect" class="ghost">Connect wallet</button>
+        <button id="btnRefresh">Refresh</button>
+      </div>
+    </div>
+    <div id="who" class="meta" style="margin-top:8px;">Not connected — you can browse, but staking needs a wallet.</div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.05rem;margin:0 0 10px;">Open a market</h2>
+    <div class="grid two">
+      <div><label>Repository (owner/name)</label><input id="repo" placeholder="genlayerlabs/genlayer-js" /></div>
+      <div><label>Milestone deadline</label><input id="deadline" type="datetime-local" /></div>
+    </div>
+    <div style="margin-top:10px;"><label>Success criteria</label><input id="milestone" placeholder="Ship TypeScript typings for readContract, with tests, merged into main" /></div>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnCreate">Create market</button>
+      <span class="muted" style="font-size:.82rem;">Deadline is the "on time" half — a merge dated after it counts as NO.</span>
+    </div>
+  </div>
+
+  <div id="markets"></div>
+  <div class="card"><label>Activity</label><div id="log" class="muted"><div>Idle.</div></div></div>
+  <p class="foot">
+    Reads via genlayer-js · Explorer:
+    <a href="https://explorer-bradbury.genlayer.com" target="_blank" rel="noopener">explorer-bradbury.genlayer.com</a>
+  </p>
+</div>
+
+<script type="module">
+import { createClient, createAccount } from "https://esm.sh/genlayer-js@1.1.8";
+import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
+
+const CONTRACT = "0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c";
+const EXPLORER = "https://explorer-bradbury.genlayer.com/transaction/";
+const GAS = 5000000n;
+
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+function log(msg, hash) {
+  const d = document.createElement("div");
+  d.innerHTML = esc(msg) + (hash ? ' — <a href="' + EXPLORER + esc(hash) + '" target="_blank" rel="noopener">' + esc(hash) + "</a>" : "");
+  const box = el("log");
+  if (box.firstChild && box.firstChild.textContent === "Idle.") box.innerHTML = "";
+  box.prepend(d);
+}
+
+let client = createClient({ chain: testnetBradbury });
+let account = null;
+
+el("addr").textContent = CONTRACT;
+
+// --- wallet: try accounts first so an already-connected user gets no popup ---
+async function connect() {
+  if (!window.ethereum) { log("No injected wallet found. Install a browser wallet to stake."); return; }
+  let accts = await window.ethereum.request({ method: "eth_accounts" });
+  if (!accts || accts.length === 0) accts = await window.ethereum.request({ method: "eth_requestAccounts" });
+  account = accts[0];
+  // account MUST be an address string + provider, or writes sign with a local key
+  client = createClient({ chain: testnetBradbury, account, provider: window.ethereum });
+  el("who").textContent = "Connected: " + account;
+  log("Wallet connected.");
+  loadMarkets();
+}
+
+// --- reads ---
+function parseMarket(row) {
+  const parts = String(row).split("|");
+  return {
+    repo: parts[0] || "", milestone: parts[1] || "", status: parts[2] || "",
+    outcome: parts[3] || "", deadline: Number(parts[4] || 0), pool: parts[5] || "0",
+    reasoning: parts.slice(6).join("|"),
+  };
+}
+
+async function loadMarkets() {
+  el("markets").innerHTML = '<div class="card muted">Loading markets…</div>';
+  try {
+    const count = Number(await client.readContract({ address: CONTRACT, functionName: "getCount", args: [] }));
+    if (!count) { el("markets").innerHTML = '<div class="card muted">No markets yet. Open the first one above.</div>'; return; }
+    let html = "";
+    for (let i = count; i >= 1; i--) {
+      const id = "milestone-" + i;
+      const m = parseMarket(await client.readContract({ address: CONTRACT, functionName: "getMarket", args: [id] }));
+      const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : "ok";
+      const ocls = m.outcome === "YES" ? "ok" : m.outcome === "NO" ? "no" : "dim";
+      const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
+      html += '<div class="m">';
+      html += '<h3>' + esc(m.milestone || "(no criteria)") + "</h3>";
+      html += '<div class="meta">' + esc(m.repo) + " · id " + esc(id) + " · deadline " + esc(when) + "</div>";
+      html += '<div class="row" style="margin-top:8px;">Status ' + '<span class="badge ' + cls + '">' + esc(m.status || "-") + "</span>";
+      html += "Outcome <span class=\"badge " + ocls + '">' + esc(m.outcome || "—") + "</span>";
+      html += '<span class="muted" style="font-size:.82rem;">pool ' + esc(m.pool) + " wei</span></div>";
+      if (m.reasoning) html += '<div class="reason">' + esc(m.reasoning) + "</div>";
+      html += '<div class="row" style="margin-top:10px;">';
+      if (m.status === "OPEN") {
+        html += '<button class="small" data-act="stake-yes" data-id="' + esc(id) + '">Stake YES</button>';
+        html += '<button class="small ghost" data-act="stake-no" data-id="' + esc(id) + '">Stake NO</button>';
+        html += '<button class="small ghost" data-act="resolve" data-id="' + esc(id) + '">Resolve (after deadline)</button>';
+      } else if (m.status === "RESOLVED") {
+        html += '<button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button>';
+      } else {
+        html += '<button class="small" data-act="claim" data-id="' + esc(id) + '">Claim payout</button>';
+        if (account) {
+          const p = await client.readContract({ address: CONTRACT, functionName: "previewPayout", args: [id, account] });
+          html += '<span class="muted" style="font-size:.82rem;">your payout: ' + esc(p) + " wei</span>";
+        }
+      }
+      html += "</div></div>";
+    }
+    el("markets").innerHTML = html;
+  } catch (e) {
+    el("markets").innerHTML = '<div class="card">Read failed: ' + esc(e && e.message ? e.message : e) + "</div>";
+  }
+}
+
+// --- writes ---
+async function write(fn, args, value = 0n) {
+  if (!account) { log("Connect a wallet first."); return; }
+  try {
+    log("Sending " + fn + "…");
+    const hash = await client.writeContract({ address: CONTRACT, functionName: fn, args, value, gasLimit: GAS });
+    log(fn + " sent", hash);
+    const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
+    log(fn + " status " + (rc && rc.status), hash);
+    await loadMarkets();
+  } catch (e) {
+    log(fn + " failed: " + (e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : e));
+  }
+}
+
+el("btnConnect").addEventListener("click", connect);
+el("btnRefresh").addEventListener("click", loadMarkets);
+
+el("btnCreate").addEventListener("click", () => {
+  const repo = el("repo").value.trim();
+  const milestone = el("milestone").value.trim();
+  const dt = el("deadline").value;
+  if (!repo || !milestone || !dt) { log("Repository, criteria and deadline are all required."); return; }
+  const deadline = BigInt(Math.floor(new Date(dt).getTime() / 1000));
+  write("createMarket", [repo, milestone, deadline]);
+});
+
+el("markets").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const act = btn.dataset.act;
+  if (act === "stake-yes" || act === "stake-no") {
+    const amt = prompt("Amount to stake in wei:", "1000000000000000");
+    if (!amt) return;
+    const side = act === "stake-yes" ? "YES" : "NO";
+    write("stake", [id, side], BigInt(amt));
+    return;
+  }
+  if (act === "resolve") return write("resolve", [id]);
+  if (act === "settle") return write("settle", [id]);
+  if (act === "claim") return write("claim", [id]);
+});
+
+loadMarkets();
+</script>
+</body>
+</html>
