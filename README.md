@@ -223,6 +223,43 @@ which this one supersedes:
 | `milestone-1` | At least one pull request has been merged into this repository. | **YES** | `0xa821e44c41253231fa6d4d174bdaf1b330a2c24ec123aa582b34e55896f5369f` |
 | `milestone-2` | A quantum teleportation module exists at /src/quantum.py with full unit tests. | **NO** | `0x1d29c62ce933ba1519504be57bb7523bbc891763dcc1dbded53973c35f5c425c` |
 
+### The payout was proven with a real balance delta
+
+Not a bookkeeping map, and not the tx status — actual `eth_getBalance` on both
+sides, on this contract, with two distinct funded accounts (the deployer only
+paid fees and staked the losing side, per the steward rule that the deployer must
+not be a participant):
+
+| | |
+|---|---|
+| staker A (main) | staked **0.3 GEN on NO** |
+| staker B (throwaway `0x5e048eD4BFd5AEd9EA75a48f5abFF950E7f28dD7`) | staked **0.5 GEN on YES** |
+| pool after staking | **0.8 GEN** — and `contractBalance` read **0.8 GEN**, so the value really arrived |
+| consensus | round 1 `LEADER_TIMEOUT`, round 2 `VALIDATORS_TIMEOUT`, round 3 → **YES** |
+| `settle` | `SETTLED` |
+| `claim` by B | emitted an external message `{recipient: B, value: 0.8e18, onAcceptance: false}` |
+
+Then, once the claim transaction reached `FINALIZED`:
+
+```
+contract  0.800000 GEN  ->  0.000000 GEN     (delta 0.800000 GEN out)
+staker B  1.499777 GEN  ->  2.299777 GEN     (delta 0.800000 GEN in)
+```
+
+Both deltas are exactly the payout. The winner received real GEN.
+
+**Timing matters when reading this.** External messages execute on
+*finalization*, not on acceptance, and on Bradbury finalization took **~20–30
+minutes** here — an older tx on the same contract took about 2.4 hours. A
+balance check a few minutes after the claim shows **zero movement on a payout
+that is working correctly**. The proof polls for `status === 7` rather than
+sleeping a fixed interval.
+
+The alternative is not to force it: `emit_transfer` takes
+`on: Literal['accepted', 'finalized']` defaulting to `'finalized'`, and the
+stdlib warns that value transfers on `accepted` "may lead to undesired results.
+Prefer to use `finalized` (default)." The slow path is the correct one.
+
 **Studio Next (chain 61997) is not deployed.** The `genlayer-js` build available
 here exposes no `estimateTransactionFees` / `createFeesDistribution`, and a plain
 `deployContract` to 61997 reverts at the consensus contract
