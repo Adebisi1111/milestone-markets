@@ -118,20 +118,29 @@ validator compares dates rather than assuming.
 
 ## Tests
 
-25 direct-mode tests, no network and no chain — the GitHub API and the LLM are
+27 direct-mode tests, no network and no chain — the GitHub API and the LLM are
 mocked and the clock is warped with `direct_vm.warp(...)` so deadlines can be
 crossed inside a test.
 
 ```bash
-python3 -m pytest tests/direct -q
-# 25 passed
+gltest tests/direct -q
+# 27 passed
 ```
+
+(`python3 -m pytest` is not the right entry point here: the GenLayer test runner
+ships with the `genlayer` CLI, and `gltest` is the command that resolves it.)
+
+One environment detail the suite handles explicitly: in direct mode a payable
+call does **not** credit value to the contract, so `self.balance` stays 0 however
+much `stake` sends. The `stake` helper funds the contract with
+`direct_vm.deal(...)` to mirror what the chain does — otherwise `claim`'s balance
+guard correctly refuses every payout.
 
 Covered: creation validation, staking both sides, bad side, zero value, staking
 after the deadline, resolve before the deadline, resolve YES, resolve NO,
 resolve is not repeatable, the caller supplies no evidence source, parimutuel
 payout math, loser cannot claim, double-claim rejected, claim before settlement
-rejected — plus three fund-safety cases:
+rejected — plus four fund-safety cases:
 
 - **No winning staker.** Outcome YES with only NO backed: `settle` returns
   `VOID` and the NO staker gets their stake back. Paying nobody would otherwise
@@ -142,9 +151,16 @@ rejected — plus three fund-safety cases:
   a verdict they dislike.
 - **Separator in the criteria.** `Ship A | B | C` no longer shifts the other
   fields of a read.
+- **Under-funded payout.** An `emit_transfer` for more than the contract holds is
+  a silent no-op — it returns success and moves nothing. `claim` now checks
+  `self.balance` **before** marking the claim, so a short contract refuses and the
+  winner can retry, instead of being recorded as paid, receiving zero, and being
+  locked out by `Already claimed`.
 
-The fund-safety tests are mutation-checked: removing the `VOID` branch in
-`settle` turns `test_no_winning_stake_voids_instead_of_stranding_funds` red.
+Each of these is mutation-checked. Removing the `VOID` branch in `settle` turns
+`test_no_winning_stake_voids_instead_of_stranding_funds` red; removing the
+balance guard turns
+`test_claim_refuses_and_does_not_burn_the_claim_when_balance_is_short` red.
 
 ## Known limitation
 
@@ -164,9 +180,8 @@ GLPASS=<keystore-password> node deploy.mjs
 
 | | |
 |---|---|
-| Contract (Bradbury, chain 4221) | `0x6b159262924276546A10Ed83A81c3caDb0E2D327` |
-| Explorer | https://explorer-bradbury.genlayer.com/address/0x6b159262924276546A10Ed83A81c3caDb0E2D327 |
-| Deploy tx | `0x335ce79f24f182f9eddc1302f3e77a8d7dc6452dd284c7fd0b745cce853d0fa2` |
+| Contract (Bradbury, chain 4221) | `0x203F67178a7B25803854D179d72Bf40Cfcdc2c88` |
+| Explorer | https://explorer-bradbury.genlayer.com/address/0x203F67178a7B25803854D179d72Bf40Cfcdc2c88 |
 | Live app | https://adebisi1111.github.io/milestone-markets/ |
 | Repository | https://github.com/Adebisi1111/milestone-markets |
 
@@ -175,17 +190,33 @@ address returns the contract source from the chain; its sha256 matches
 `contracts/milestone_market.py` in this repo:
 
 ```
-on-chain sha256: c0579c81e8c68212
-repo     sha256: c0579c81e8c68212
+on-chain sha256: 932b4bb405a92e15
+repo     sha256: 932b4bb405a92e15
 ```
 
-Reads confirm live state: `getCount` = 1, `milestone-1` `OPEN`, deadline
-`2026-10-19 09:04 UTC` on `genlayerlabs/genlayer-js`.
+Reads confirm live state: `getCount` = 1, `milestone-1` `OPEN` on
+`genlayerlabs/genlayer-js`, and `contractBalance` = 0 (no stakes yet).
 
 The explorer path is `/address/` (verified 200); `/contract/` returns 404.
 
-The two-direction live proof (YES and NO) was produced on the previous
-contract deploy, which this one supersedes:
+### Contract size is a deploy constraint
+
+Bradbury rejects a contract over roughly 19.5 KB with `gas limit too high` — it
+is a size ceiling, not a gas setting, and raising `gasLimit` does not help. This
+was verified rather than assumed: a 20,641-byte copy of this contract fails with
+
+```
+GenLayer RPC error (eth_sendRawTransaction): [...] gas limit too high
+```
+
+while the 19,301-byte file deploys. An earlier revision of this contract grew to
+20,235 bytes when the balance guard was added and would have failed to deploy for
+that reason alone. The docstrings and comments are compressed to keep headroom;
+the evaluator prompt and the equivalence-principle string are left intact,
+because they are the judged artifact rather than prose about it.
+
+The two-direction live proof (YES and NO) was produced on an earlier deploy,
+which this one supersedes:
 
 | Market | Criteria | Outcome | Tx |
 |---|---|---|---|

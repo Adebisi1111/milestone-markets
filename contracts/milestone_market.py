@@ -2,29 +2,24 @@
 """MilestoneMarkets — prediction markets on open-source delivery.
 
 Users bet YES or NO on whether a named repository ships a milestone by a
-deadline. There is no human judge and no oracle: `resolve()` has every
-validator independently fetch the repository's commits and pull requests from
-GitHub, hand them to an LLM with the milestone criteria, and agree through
-comparative consensus on whether the milestone was actually met on time.
+deadline. There is no judge and no oracle: `resolve()` has every validator fetch
+the repository's own commits, pull requests and file tree, judge them against the
+milestone criteria, and agree through comparative consensus.
 
-The evidence is the repository itself. Nobody — not the creator, not the
-caller — can hand the validators a source of their choosing, which is the
-difference between this and a market that resolves from a cited URL.
+The evidence is the repository itself. Nobody — not the creator, not the caller —
+can hand the validators a source of their choosing, which is the difference
+between this and a market resolved from a cited URL.
 
-Time handling follows docs.genlayer.com "Transaction Context": the GenVM clock
-is pinned to the transaction datetime and is identical across validators, so
-`int(datetime.now(timezone.utc).timestamp())` is deterministic and safe for a
-deadline comparison.
+Time follows docs.genlayer.com "Transaction Context": the GenVM clock is pinned
+to the transaction datetime and identical across validators, so
+`int(datetime.now(timezone.utc).timestamp())` is deterministic.
 
-Payout is parimutuel; winners are paid native GEN. Paying an EOA is an EXTERNAL
-message, so it goes through the EVM interface (the ghost contract) —
-`gl.get_contract_at(wallet).emit_transfer()` is IC->IC only and silently moves
-nothing.
+Payout is parimutuel, in native GEN. Paying an EOA is an EXTERNAL message, so it
+goes through the EVM interface (the ghost contract).
 
-Fund safety: every market can always reach a state where stakers get their GEN
-back. Two paths guarantee it — `settle` voids a market whose winning side drew
-no stake, and `void` releases a market the validators never managed to resolve.
-Neither path can be triggered by a creator to escape a verdict they dislike.
+Fund safety: every market reaches a state where stakers get their GEN back.
+`settle` voids a market whose winning side drew no stake, and `void` releases a
+market the validators never resolved. Neither can be used to escape a verdict.
 """
 
 import json
@@ -32,9 +27,9 @@ from datetime import datetime, timezone
 
 from genlayer import *
 
-# How long after the deadline a market may sit unresolved before anyone can
-# void it and refund the stakers. Without this, a market the validators never
-# agree on holds every stake forever.
+# How long past the deadline a market may sit unresolved before anyone can void
+# it and refund the stakers. Without this, a market the validators never agree on
+# holds every stake forever.
 VOID_GRACE_SECONDS = 30 * 24 * 3600
 
 
@@ -58,29 +53,22 @@ def _iso(ts: int) -> str:
 def _gh_digest(repo: str) -> str:
     """A compact, validator-stable digest of a repository's delivery evidence.
 
-    Only stable fields are kept (short sha, author date, first message line,
-    PR number/state/merged_at/title, file paths) and every list is tightly
-    capped. Two reasons, both learned from live runs:
-
-    - A raw API response differs between validators as the repo moves, and a
-      varying input starves the equivalence principle of agreement.
-    - Every fetch and every prompt token costs validator time. A heavy digest
-      times the round out (VALIDATORS_TIMEOUT / LEADER_TIMEOUT) before consensus
-      ever runs, which is why these caps are small.
+    Only stable fields are kept and every list is tightly capped. A raw API
+    response differs between validators as the repo moves, and a varying input
+    starves the equivalence principle of agreement; and every fetch and prompt
+    token is validator wall-clock, so a heavy digest times the round out
+    (VALIDATORS_TIMEOUT / LEADER_TIMEOUT) before consensus ever runs.
     """
     lines = [f"REPOSITORY: {repo}", "COMMITS:"]
     try:
         raw = gl.nondet.web.render(
             f"https://api.github.com/repos/{repo}/commits?per_page=10", mode="text"
         )
-        commits = json.loads(raw)
-        for c in commits[:10]:
-            sha = str(c.get("sha", ""))[:7]
+        for c in json.loads(raw)[:10]:
             commit = c.get("commit", {}) or {}
-            author = commit.get("author", {}) or {}
-            date = str(author.get("date", ""))
+            date = str((commit.get("author", {}) or {}).get("date", ""))
             msg = str(commit.get("message", "")).splitlines()[0][:100] if commit.get("message") else ""
-            lines.append(f"  {sha} {date} {msg}")
+            lines.append(f"  {str(c.get('sha', ''))[:7]} {date} {msg}")
     except Exception:
         lines.append("  (commits could not be fetched)")
 
@@ -89,20 +77,18 @@ def _gh_digest(repo: str) -> str:
         raw = gl.nondet.web.render(
             f"https://api.github.com/repos/{repo}/pulls?state=all&per_page=10", mode="text"
         )
-        pulls = json.loads(raw)
-        for p in pulls[:10]:
-            num = p.get("number", "")
-            state = str(p.get("state", ""))
-            merged = str(p.get("merged_at", ""))
-            title = str(p.get("title", ""))[:100]
-            lines.append(f"  #{num} state={state} merged_at={merged} {title}")
+        for p in json.loads(raw)[:10]:
+            lines.append(
+                f"  #{p.get('number', '')} state={p.get('state', '')} "
+                f"merged_at={p.get('merged_at', '')} {str(p.get('title', ''))[:100]}"
+            )
     except Exception:
         lines.append("  (pull requests could not be fetched)")
 
-    # The file tree. Milestone criteria routinely name specific files or
-    # features and rule 3 asks the validator to confirm they exist; without the
-    # paths, a claim about a file that is NOT there cannot be disproved.
-    # HEAD avoids a second request for the default branch.
+    # The file tree is load-bearing: criteria routinely name specific files and
+    # rule 3 asks the validator to confirm they exist. Without the paths, a claim
+    # about a file that is NOT there cannot be disproved. HEAD avoids a second
+    # request for the default branch.
     lines.append("FILES:")
     try:
         tree_raw = gl.nondet.web.render(
@@ -118,8 +104,8 @@ def _gh_digest(repo: str) -> str:
 
 class MilestoneMarkets(gl.Contract):
     market_count: u256
-    # Flat maps with string keys: nested TreeMaps and in-place dataclass
-    # mutation are the two storage patterns that break consensus.
+    # Flat maps with string keys: nested TreeMaps and in-place dataclass mutation
+    # are the two storage patterns that break consensus.
     m_creator: TreeMap[str, str]
     m_repo: TreeMap[str, str]
     m_milestone: TreeMap[str, str]
@@ -145,9 +131,9 @@ class MilestoneMarkets(gl.Contract):
             raise gl.vm.UserError("Repository must be owner/name")
         if not milestone:
             raise gl.vm.UserError("Milestone criteria required")
-        # The criteria is the text the validators judge, so it is stored
-        # verbatim rather than sanitised. Views return JSON, not a delimited
-        # string, so a separator character in it cannot corrupt a read.
+        # The criteria is the text the validators judge, so it is stored verbatim
+        # rather than sanitised. Views return JSON, not a delimited string, so a
+        # separator character inside it cannot corrupt a read.
         if int(deadline) <= _now():
             raise gl.vm.UserError("Deadline must be in the future")
 
@@ -191,10 +177,9 @@ class MilestoneMarkets(gl.Contract):
     def resolve(self, market_id: str) -> str:
         """Judge the milestone from the repository's own evidence, by consensus.
 
-        Every validator fetches the commits and pull requests itself and runs the
-        same evaluator prompt against the milestone criteria. Comparative
-        consensus reconciles their verdicts, so the outcome is the network's
-        judgment of the code — not the caller's, and not a judge's.
+        Every validator fetches the evidence itself and runs the same evaluator
+        prompt, so the outcome is the network's judgment of the code — not the
+        caller's, and not a judge's.
         """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
@@ -263,7 +248,9 @@ class MilestoneMarkets(gl.Contract):
         raw = gl.eq_principle.prompt_comparative(
             _judge,
             "Both results must give the same 'outcome' value (YES or NO) for the same "
-            f"repository milestone: {milestone}",
+            f"repository milestone: {milestone}. 'outcome' is the field this contract "
+            "stores and settles payouts on, so it must be identical; the 'reasoning' "
+            "prose may differ in wording.",
         )
 
         decided = ""
@@ -290,9 +277,8 @@ class MilestoneMarkets(gl.Contract):
         """Lock the outcome so claims can open.
 
         If the winning side drew no stake there is nobody to pay, and paying
-        nobody would strand the losing side's GEN in this contract forever. In
-        that case the market is VOIDed instead, so every staker can take their
-        own stake back.
+        nobody would strand the losing side's GEN here forever. So that market is
+        VOIDed instead and every staker takes their own stake back.
         """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
@@ -310,8 +296,7 @@ class MilestoneMarkets(gl.Contract):
 
         Only reachable once the deadline is VOID_GRACE_SECONDS past and the
         market is still OPEN. It cannot be used to escape a verdict: a resolved
-        market is not OPEN, and the creator cannot call this early to dodge a
-        losing outcome.
+        market is not OPEN, and the creator cannot call it early.
         """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
@@ -351,7 +336,7 @@ class MilestoneMarkets(gl.Contract):
         return total
 
     def _payout_for(self, market_id: str, who: str) -> int:
-        """What this wallet can take out right now, for the market's state.
+        """What this wallet can take out now, for the market's state.
 
         SETTLED -> parimutuel share: winning_stake * total_pool // winning_pool.
         VOID    -> its own stake back, both sides summed.
@@ -377,7 +362,7 @@ class MilestoneMarkets(gl.Contract):
             return 0
         return (user_stake * total_pool) // winning_pool
 
-    @gl.public.write
+    @gl.public.write.payable
     def claim(self, market_id: str) -> u256:
         """Pay the winner their parimutuel share, or a staker their refund, once."""
         if self.m_creator.get(market_id, None) is None:
@@ -391,7 +376,12 @@ class MilestoneMarkets(gl.Contract):
         payout = self._payout_for(market_id, sender)
         if payout <= 0:
             raise gl.vm.UserError("Nothing to claim")
-        # Mark before transferring; a failed external message reverts the whole call.
+        # An emit_transfer for more than the contract holds is a SILENT no-op: it
+        # returns success and moves nothing. So check the balance BEFORE marking
+        # the claim -- marking first would burn the claim on a payout that never
+        # arrived, and "Already claimed" would block any retry.
+        if int(self.balance) < payout:
+            raise gl.vm.UserError("Contract balance is short of this payout")
         self.m_positions[key] = "1"
         _Payee(gl.message.sender_address).emit_transfer(value=u256(payout))
         return u256(payout)
@@ -402,9 +392,9 @@ class MilestoneMarkets(gl.Contract):
     def getMarket(self, market_id: str) -> str:
         """The whole row as JSON.
 
-        JSON rather than a delimited string: the milestone criteria is stored
-        verbatim, so a separator character inside it would shift every field of
-        a delimited read and make the UI render the wrong state.
+        JSON rather than a delimited string: the criteria is stored verbatim, so
+        a separator character inside it would shift every field of a delimited
+        read and make the UI render the wrong state.
         """
         if self.m_creator.get(market_id, None) is None:
             return json.dumps({"exists": False})
@@ -450,6 +440,11 @@ class MilestoneMarkets(gl.Contract):
     def getStake(self, market_id: str, user: str) -> str:
         """Everything this wallet has put into the market, both sides summed."""
         return str(self._stake_of(market_id, user))
+
+    @gl.public.view
+    def contractBalance(self) -> str:
+        """The liquid GEN this contract can pay out of."""
+        return str(int(self.balance))
 
     @gl.public.view
     def now(self) -> str:

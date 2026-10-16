@@ -3,10 +3,15 @@
 No network, no chain: the GitHub API and the LLM are mocked, and the clock is
 warped with `direct_vm.warp(...)` so deadlines can be crossed inside a test.
 
-The fund-safety tests at the bottom are the ones that matter. They cover the
-two ways a market could otherwise hold staker GEN forever (no winning staker,
-and a market the validators never resolve) and the read-corruption case where
-the criteria text contains the field separator.
+One environment detail matters. In direct mode a payable call does NOT credit
+the value to the contract — `self.balance` stays 0 however much `stake` sends —
+so the `stake` helper below funds the contract explicitly, mirroring what the
+chain does when it moves the GEN. Without that, `claim`'s balance guard
+(correctly) refuses every payout.
+
+The fund-safety tests at the bottom are the ones that matter: the two ways a
+market could hold staker GEN forever, the read-corruption case, and the silent
+no-op on an under-funded payout.
 """
 
 import json
@@ -97,15 +102,31 @@ def row(c, mid):
     return json.loads(c.getMarket(mid))
 
 
+def stake(vm, c, who, mid, side, amount):
+    """Stake, then mirror on-chain value movement into the contract balance.
+
+    Direct mode leaves `self.balance` at 0 after a payable call, so the stake is
+    credited here the way the chain credits it.
+    """
+    vm.sender = who
+    vm.value = amount
+    c.stake(mid, side)
+    vm.deal(c.address, int(c.contractBalance()) + amount)
+    vm.value = 0
+
+
+def _open(vm, c, who):
+    vm.sender = who
+    return c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+
+
 # ------------------------------------------------------------------ creation
 
 
 def test_create_market(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
     assert mid == "milestone-1"
 
     m = row(c, mid)
@@ -155,16 +176,10 @@ def test_getMarket_unknown_id(direct_vm, direct_deploy):
 def test_stake_yes_and_no(direct_vm, direct_deploy, direct_alice, direct_bob):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
-    direct_vm.sender = direct_alice
-    direct_vm.value = 100
-    c.stake(mid, "YES")
-
-    direct_vm.sender = direct_bob
-    direct_vm.value = 50
-    c.stake(mid, "NO")
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
 
     m = row(c, mid)
     assert m["pool"] == 150
@@ -180,8 +195,7 @@ def test_stake_yes_and_no(direct_vm, direct_deploy, direct_alice, direct_bob):
 def test_stake_rejects_bad_side(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
     direct_vm.value = 10
     with direct_vm.expect_revert("Side must be YES or NO"):
         c.stake(mid, "MAYBE")
@@ -190,8 +204,7 @@ def test_stake_rejects_bad_side(direct_vm, direct_deploy, direct_alice):
 def test_stake_rejects_zero_value(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
     direct_vm.value = 0
     with direct_vm.expect_revert("Must send GEN"):
         c.stake(mid, "YES")
@@ -200,8 +213,7 @@ def test_stake_rejects_zero_value(direct_vm, direct_deploy, direct_alice):
 def test_stake_rejected_after_deadline(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
     direct_vm.warp(AFTER)
     direct_vm.value = 10
@@ -215,8 +227,7 @@ def test_stake_rejected_after_deadline(direct_vm, direct_deploy, direct_alice):
 def test_resolve_before_deadline_reverts(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
     with direct_vm.expect_revert("deadline has not passed"):
         c.resolve(mid)
 
@@ -224,8 +235,7 @@ def test_resolve_before_deadline_reverts(direct_vm, direct_deploy, direct_alice)
 def test_resolve_yes_when_merged_before_deadline(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -241,8 +251,7 @@ def test_resolve_yes_when_merged_before_deadline(direct_vm, direct_deploy, direc
 def test_resolve_no_when_never_merged(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm, commits=[], pulls=[])
@@ -255,8 +264,7 @@ def test_resolve_no_when_never_merged(direct_vm, direct_deploy, direct_alice):
 def test_resolve_is_not_repeatable(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -271,8 +279,7 @@ def test_caller_supplies_no_evidence_source(direct_vm, direct_deploy, direct_ali
     """The caller supplies no source: the contract builds the GitHub URLs itself."""
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -334,15 +341,9 @@ def test_criteria_with_separator_after_resolution(
 def test_claim_parimutuel(direct_vm, direct_deploy, direct_alice, direct_bob):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-
-    direct_vm.sender = direct_alice
-    direct_vm.value = 100
-    c.stake(mid, "YES")
-    direct_vm.sender = direct_bob
-    direct_vm.value = 50
-    c.stake(mid, "NO")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -364,15 +365,9 @@ def test_claim_parimutuel(direct_vm, direct_deploy, direct_alice, direct_bob):
 def test_loser_cannot_claim(direct_vm, direct_deploy, direct_alice, direct_bob):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-
-    direct_vm.sender = direct_alice
-    direct_vm.value = 100
-    c.stake(mid, "YES")
-    direct_vm.sender = direct_bob
-    direct_vm.value = 50
-    c.stake(mid, "NO")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -388,11 +383,8 @@ def test_loser_cannot_claim(direct_vm, direct_deploy, direct_alice, direct_bob):
 def test_claim_requires_settlement(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-
-    direct_vm.value = 100
-    c.stake(mid, "YES")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -401,6 +393,62 @@ def test_claim_requires_settlement(direct_vm, direct_deploy, direct_alice):
 
     with direct_vm.expect_revert("Not settled"):
         c.claim(mid)
+
+
+# ------------------------------------- BUG 4: silent no-op on a short balance
+
+
+def test_claim_refuses_and_does_not_burn_the_claim_when_balance_is_short(
+    direct_vm, direct_deploy, direct_alice, direct_bob
+):
+    """An emit_transfer larger than the contract holds moves NOTHING.
+
+    It returns success. So if the claim were marked first, the winner would be
+    recorded as paid, receive zero, and be blocked from retrying by
+    "Already claimed". The guard must refuse BEFORE marking, and the claim must
+    still work once the contract can cover it.
+    """
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
+
+    direct_vm.warp(AFTER)
+    _mock_github(direct_vm)
+    _verdict(direct_vm, "YES")
+    c.resolve(mid)
+    c.settle(mid)
+
+    # Drain the contract below the 150 payout.
+    direct_vm.deal(c.address, 10)
+    assert c.contractBalance() == "10"
+
+    direct_vm.sender = direct_alice
+    with direct_vm.expect_revert("balance is short"):
+        c.claim(mid)
+
+    # The claim must NOT have been burned.
+    assert c.isClaimed(mid, to_hex(direct_alice)) == "0"
+
+    # Refund the contract; the same claim now succeeds.
+    direct_vm.deal(c.address, 150)
+    assert c.claim(mid) == 150
+    assert c.isClaimed(mid, to_hex(direct_alice)) == "1"
+
+
+def test_contract_balance_view_tracks_stakes(
+    direct_vm, direct_deploy, direct_alice, direct_bob
+):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+    assert c.contractBalance() == "0"
+
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
+    assert c.contractBalance() == "150"
+    assert c.contractBalance() == str(row(c, mid)["pool"])
 
 
 # ------------------------------------------- BUG 1: no winning staker -> VOID
@@ -416,13 +464,10 @@ def test_no_winning_stake_voids_instead_of_stranding_funds(
     """
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
+    mid = _open(direct_vm, c, direct_alice)
 
     # Only the losing side is backed.
-    direct_vm.sender = direct_bob
-    direct_vm.value = 50
-    c.stake(mid, "NO")
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -451,15 +496,9 @@ def test_unresolved_market_can_be_voided_after_grace(
     """A market the validators never agree on must not hold GEN forever."""
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-
-    direct_vm.sender = direct_alice
-    direct_vm.value = 100
-    c.stake(mid, "YES")
-    direct_vm.sender = direct_bob
-    direct_vm.value = 60
-    c.stake(mid, "NO")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 60)
 
     # Past the deadline but still inside the grace window: not yet voidable.
     direct_vm.warp(AFTER)
@@ -484,13 +523,9 @@ def test_a_wallet_that_staked_both_sides_refunds_the_sum(
 ):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-
-    direct_vm.value = 40
-    c.stake(mid, "YES")
-    direct_vm.value = 10
-    c.stake(mid, "NO")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 40)
+    stake(direct_vm, c, direct_alice, mid, "NO", 10)
 
     direct_vm.warp(LONG_AFTER)
     c.void(mid)
@@ -504,15 +539,9 @@ def test_void_cannot_be_used_to_escape_a_verdict(
     """A resolved market is not OPEN, so the creator cannot dodge a loss."""
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-
-    direct_vm.sender = direct_alice
-    direct_vm.value = 100
-    c.stake(mid, "YES")
-    direct_vm.sender = direct_bob
-    direct_vm.value = 60
-    c.stake(mid, "NO")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 60)
 
     direct_vm.warp(AFTER)
     _mock_github(direct_vm)
@@ -531,10 +560,8 @@ def test_void_cannot_be_used_to_escape_a_verdict(
 def test_void_is_not_repeatable(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-    direct_vm.value = 10
-    c.stake(mid, "YES")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 10)
 
     direct_vm.warp(LONG_AFTER)
     c.void(mid)
@@ -545,8 +572,6 @@ def test_void_is_not_repeatable(direct_vm, direct_deploy, direct_alice):
 def test_preview_payout_is_zero_while_open(direct_vm, direct_deploy, direct_alice):
     direct_vm.warp(BEFORE)
     c = direct_deploy("contracts/milestone_market.py")
-    direct_vm.sender = direct_alice
-    mid = c.createMarket(REPO, MILESTONE, ts(DEADLINE))
-    direct_vm.value = 100
-    c.stake(mid, "YES")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
     assert c.previewPayout(mid, to_hex(direct_alice)) == "0"
