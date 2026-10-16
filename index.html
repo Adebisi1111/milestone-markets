@@ -3,485 +3,345 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>MilestoneMarkets — bet on open-source delivery</title>
+<meta name="theme-color" content="#08090D" />
+<meta name="description" content="Prediction markets on open-source delivery. GenLayer's AI validators read the repository itself to settle whether a milestone shipped on time." />
+<title>MilestoneMarkets — markets that settle themselves</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%236D5EF8'/%3E%3Cpath d='M9 22V13h7v-3h7' stroke='%23fff' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
 <style>
-  :root { color-scheme: dark; --bg:#0b0e14; --card:#131824; --line:#222a3a; --ink:#e8ecf1; --mut:#9aa4b2; --acc:#4c7dff; }
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); margin:0; padding:20px; line-height:1.5; }
-  .wrap { max-width: 900px; margin: 0 auto; }
-  h1 { font-size:1.5rem; margin:0 0 4px; }
-  .sub { color:var(--mut); margin:0 0 18px; font-size:.94rem; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
-  label { font-size:.78rem; color:var(--mut); display:block; margin:0 0 5px; }
-  input, select { width:100%; background:var(--bg); border:1px solid #2a3346; color:var(--ink); border-radius:10px; padding:10px 12px; font-size:.95rem; }
-  .grid { display:grid; gap:10px; grid-template-columns:1fr; }
-  @media (min-width:640px){ .grid.two { grid-template-columns:1fr 1fr; } }
-  button { background:var(--acc); color:#fff; border:0; border-radius:10px; padding:10px 16px; font-weight:600; cursor:pointer; font-size:.92rem; }
-  button:hover { background:#3a6bf0; }
-  button.ghost { background:#1c2432; color:var(--ink); }
-  button.small { padding:7px 12px; font-size:.85rem; }
-  button:disabled { opacity:.5; cursor:not-allowed; }
-  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
-  .muted { color:var(--mut); }
-  .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.78rem; font-weight:700; }
-  .ok { background:#10391f; color:#4ade80; } .no { background:#3a1414; color:#f87171; }
-  .warn { background:#3a2f10; color:#facc15; } .dim { background:#1c2432; color:var(--mut); }
-  .void { background:#2a1a3a; color:#c084fc; }
-  .m { border:1px solid var(--line); border-radius:12px; padding:14px; background:#0f1420; margin-bottom:12px; }
-  .m h3 { margin:0 0 4px; font-size:1rem; word-break:break-word; }
-  .meta { font-size:.82rem; color:var(--mut); word-break:break-all; }
-  .reason { background:var(--bg); border-left:3px solid var(--acc); padding:8px 12px; border-radius:6px; margin-top:10px; font-size:.88rem; color:#c7d0dc; }
-  .stake { margin-top:12px; padding-top:12px; border-top:1px dashed #26304a; }
-  .stake .row { align-items:flex-end; }
-  .stake input { max-width:180px; }
-  .odds { font-size:.85rem; color:#c7d0dc; margin-top:9px; line-height:1.6; }
-  .odds b { color:#4ade80; } .odds i { color:#f87171; font-style:normal; }
-  #log { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:240px; overflow:auto; }
-  #log div { padding:3px 0; border-bottom:1px solid #1a2130; word-break:break-all; }
-  #log div.prog { color:#facc15; }
-  a { color:#8ab4ff; word-break:break-all; }
-  .foot { color:#6b7686; font-size:.8rem; margin-top:10px; }
+  :root{
+    color-scheme: dark;
+    --bg:#08090D; --surface:#0F1117; --surface-2:#141720; --surface-3:#1A1E29;
+    --line:#212533; --line-2:#2C3243;
+    --ink:#EEF0F5; --ink-2:#AEB6C6; --mut:#727B8C;
+    --brand:#6D5EF8; --brand-2:#8C7DFF; --brand-dim:#6D5EF81F;
+    --yes:#2FD98A; --no:#FF6B81; --warn:#F5C451;
+    --r1:8px; --r2:12px; --r3:18px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);min-height:100vh;
+    font:400 15.5px/1.62 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(1000px 460px at 14% -10%, #6D5EF81F, transparent 62%),
+      radial-gradient(820px 400px at 86% -6%, #2FD98A14, transparent 64%);
+    background-repeat:no-repeat;
+  }
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .micro{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mut);font-weight:650}
+  .wrap{max-width:1060px;margin:0 auto;padding:0 22px}
+
+  /* ------------------------------------------------------------------- nav */
+  .top{position:sticky;top:0;z-index:20;backdrop-filter:blur(16px) saturate(140%);background:#08090DE6;border-bottom:1px solid var(--line-2);box-shadow:0 12px 28px -22px #000}
+  .top .inner{max-width:1060px;margin:0 auto;padding:13px 22px;display:flex;align-items:center;gap:14px}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
+  .brand .wm{font-weight:680;letter-spacing:-.015em;font-size:1.02rem;display:inline-flex;gap:.34em}
+  .brand .wm span{color:var(--brand-2)}
+  .navlinks{display:flex;gap:20px;margin-left:14px}
+  .navlinks a{color:var(--mut);text-decoration:none;font-size:.86rem;font-weight:540}
+  .navlinks a:hover{color:var(--ink)}
+  @media(max-width:760px){.navlinks{display:none}}
+  .spacer{flex:1}
+
+  button,.btn{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:10px;transition:.15s ease;text-decoration:none;display:inline-flex;align-items:center;gap:8px}
+  .btn-primary{background:var(--brand);color:#fff;padding:10px 18px;font-weight:630;font-size:.9rem}
+  .btn-primary:hover{background:var(--brand-2)}
+  .btn-ghost{background:var(--surface-2);color:var(--ink);border-color:var(--line-2);padding:10px 16px;font-weight:560;font-size:.9rem}
+  .btn-ghost:hover{background:var(--surface-3)}
+
+  /* ------------------------------------------------------------------ hero */
+  .hero{padding:78px 0 20px;text-align:center}
+  .kicker{display:inline-flex;align-items:center;gap:8px;padding:6px 13px;border-radius:999px;background:var(--surface-2);border:1px solid var(--line);font-size:.76rem;color:var(--ink-2);margin-bottom:22px}
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--yes);box-shadow:0 0 0 3px #2FD98A22}
+  h1{margin:0 auto 18px;max-width:17ch;font-size:clamp(2.2rem,6vw,3.4rem);font-weight:730;letter-spacing:-.035em;line-height:1.06}
+  h1 em{font-style:normal;background:linear-gradient(96deg,#8C7DFF 8%,#2FD98A 92%);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{margin:0 auto;max-width:60ch;color:var(--ink-2);font-size:1.06rem}
+  .cta{display:flex;gap:12px;justify-content:center;margin:30px 0 0;flex-wrap:wrap}
+  .hero .note{margin-top:16px;color:var(--mut);font-size:.8rem}
+
+  /* ----------------------------------------------------------------- stats */
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin:56px 0 0}
+  @media(min-width:760px){.stats{grid-template-columns:repeat(4,1fr)}}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:18px}
+  .stat b{display:block;font-size:1.5rem;font-weight:700;letter-spacing:-.03em;margin-top:6px}
+  .stat .sub{color:var(--mut);font-size:.78rem;margin-top:3px}
+
+  /* -------------------------------------------------------------- preview */
+  .preview{margin:52px auto 0;max-width:720px;text-align:left}
+  .pv{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:20px;box-shadow:0 24px 60px -28px #000, 0 0 0 1px #FFFFFF08 inset}
+  .pv-top{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .pv .tag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:.71rem;font-weight:680;letter-spacing:.03em}
+  .pv h3{margin:0 0 10px;font-size:1.02rem;font-weight:620;letter-spacing:-.014em;line-height:1.4}
+  .pv-meta{display:flex;gap:8px;flex-wrap:wrap;font-size:.79rem;color:var(--mut);margin-bottom:14px}
+  .pv-bar{height:7px;border-radius:999px;overflow:hidden;background:#FF6B8133;display:flex;margin-bottom:8px}
+  .pv-bar i{display:block;background:var(--yes)}
+  .pv-row{display:flex;justify-content:space-between;font-size:.78rem;color:var(--ink-2);margin-bottom:16px}
+  .pv-row .y{color:var(--yes);font-weight:620}
+  .pv-row .n{color:var(--no);font-weight:620}
+  .pv-quote{background:#06070A;border:1px solid var(--line);border-left:2px solid var(--brand);border-radius:10px;padding:12px 14px;font-size:.84rem;color:var(--ink-2)}
+  .pv-quote .micro{display:block;margin-bottom:5px;color:var(--brand-2)}
+  .pv-cap{text-align:center;color:var(--mut);font-size:.78rem;margin-top:14px}
+
+  /* -------------------------------------------------------------- sections */
+  section{padding:74px 0}
+  .shead{max-width:62ch;margin-bottom:36px}
+  h2{margin:0 0 12px;font-size:clamp(1.45rem,3vw,1.9rem);font-weight:700;letter-spacing:-.028em;line-height:1.2}
+  .shead p{margin:0;color:var(--ink-2)}
+  .hr{height:1px;background:var(--line);border:0;margin:0}
+
+  .cards{display:grid;gap:16px;grid-template-columns:1fr}
+  @media(min-width:720px){.cards.two{grid-template-columns:1fr 1fr}.cards.three{grid-template-columns:repeat(3,1fr)}}
+  .box{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:22px}
+  .box h3{margin:0 0 8px;font-size:1rem;font-weight:650;letter-spacing:-.012em}
+  .box p{margin:0;color:var(--ink-2);font-size:.92rem}
+  .num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:8px;background:var(--brand-dim);color:var(--brand-2);font-size:.78rem;font-weight:700;margin-bottom:12px}
+
+  .vs{width:100%;border-collapse:collapse;font-size:.9rem;background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);overflow:hidden}
+  .vs th,.vs td{padding:13px 16px;text-align:left;border-bottom:1px solid var(--line)}
+  .vs th{font-size:.72rem;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);font-weight:650;background:var(--surface-2)}
+  .vs tr:last-child td{border-bottom:0}
+  .vs td:first-child{color:var(--mut);width:34%}
+  .vs .good{color:var(--yes);font-weight:560}
+  .vs .bad{color:var(--ink-2)}
+
+  pre{margin:0;background:#06070A;border:1px solid var(--line);border-radius:var(--r3);padding:20px;overflow:auto;font-size:.79rem;line-height:1.72;color:#C4CBD8}
+  pre .k{color:var(--brand-2)}
+  pre .c{color:#5E6675}
+
+  .proof{display:grid;gap:16px;grid-template-columns:1fr}
+  @media(min-width:720px){.proof{grid-template-columns:1fr 1fr}}
+  .pr{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:22px}
+  .pr .tag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:.72rem;font-weight:680}
+  .t-yes{background:#2FD98A1A;color:var(--yes);border:1px solid #2FD98A33}
+  .t-no{background:#FF6B811A;color:var(--no);border:1px solid #FF6B8133}
+  .pr p{margin:12px 0 0;color:var(--ink-2);font-size:.9rem}
+  .pr .mono{font-size:.76rem;color:var(--mut);word-break:break-all;display:block;margin-top:12px}
+  .delta{background:#06070A;border:1px solid var(--line);border-radius:var(--r2);padding:16px;margin-top:16px;font-size:.82rem;line-height:1.9}
+  .delta .mono{display:block;color:var(--mut);word-break:normal;margin:0}
+  .delta b{color:var(--yes)}
+
+  .final{text-align:center;background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:56px 28px}
+  .final h2{margin-bottom:12px}
+  .final p{margin:0 auto 26px;max-width:52ch;color:var(--ink-2)}
+
+  footer{border-top:1px solid var(--line);padding:30px 0;margin-top:20px}
+  footer .inner{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;font-size:.82rem;color:var(--mut);align-items:center}
+  footer a{color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--line-2)}
+  footer a:hover{color:var(--brand-2)}
+  footer .row{display:flex;gap:18px;flex-wrap:wrap}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <h1>MilestoneMarkets</h1>
-  <p class="sub">
-    Bet YES or NO on whether a repository ships a milestone by a deadline.
-    GenLayer's AI validators read the repo's own commits, pull requests and files to decide —
-    nobody picks the evidence, not even the market creator.
-  </p>
 
-  <div class="card">
-    <div class="row" style="justify-content:space-between;">
-      <div>
-        <div class="muted" style="font-size:.78rem;">Contract</div>
-        <div id="addr" class="meta"></div>
-        <div id="net" class="meta" style="margin-top:2px;"></div>
-      </div>
-      <div class="row">
-        <button id="btnConnect" class="ghost">Connect wallet</button>
-        <button id="btnRefresh">Refresh</button>
-      </div>
+<div class="top">
+  <div class="inner">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#6D5EF8"/><stop offset="1" stop-color="#2FD98A"/>
+        </linearGradient></defs>
+        <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+        <path d="M9.5 22.5V13h6.5v-3h6.5" stroke="#fff" stroke-width="2.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="9.5" cy="22.5" r="2.3" fill="#fff"/>
+        <circle cx="22.5" cy="10" r="2.3" fill="#fff"/>
+      </svg>
+      <span class="wm">Milestone<span>Markets</span></span>
+    </a>
+    <div class="navlinks">
+      <a href="#how">How it works</a>
+      <a href="#why">Why it's different</a>
+      <a href="#proof">Proof</a>
     </div>
-    <div id="who" class="meta" style="margin-top:8px;">Not connected — you can browse, but staking needs a wallet.</div>
+    <div class="spacer"></div>
+    <a class="btn btn-primary" href="./app.html">Open the app</a>
   </div>
-
-  <div class="card">
-    <h2 style="font-size:1.05rem;margin:0 0 10px;">Open a market</h2>
-    <div class="grid two">
-      <div><label>Repository (owner/name)</label><input id="repo" placeholder="genlayerlabs/genlayer-js" /></div>
-      <div><label>Milestone deadline</label><input id="deadline" type="datetime-local" /></div>
-    </div>
-    <div style="margin-top:10px;"><label>Success criteria</label><input id="milestone" placeholder="Ship TypeScript typings for readContract, with tests, merged into main" /></div>
-    <div class="row" style="margin-top:12px;">
-      <button id="btnCreate">Create market</button>
-      <span class="muted" style="font-size:.82rem;">Deadline is the "on time" half — a merge dated after it counts as NO.</span>
-    </div>
-  </div>
-
-  <div id="markets"></div>
-  <div class="card"><label>Activity</label><div id="log" class="muted"><div>Idle.</div></div></div>
-  <p class="foot">
-    Reads via genlayer-js · Explorer:
-    <a id="explorer" href="#" target="_blank" rel="noopener"></a>
-  </p>
 </div>
 
-<script type="module">
-import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
-import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
+<div class="wrap">
+  <div class="hero">
+    <span class="kicker"><span class="dot"></span>Live on GenLayer Bradbury testnet</span>
+    <h1>Markets that <em>settle themselves</em>.</h1>
+    <p class="lede">
+      Stake GEN on whether a repository ships a milestone by its deadline. No oracle, no judge,
+      no committee — GenLayer's AI validators read the repository's own commits, pull requests
+      and file tree, and agree on the answer.
+    </p>
+    <div class="cta">
+      <a class="btn btn-primary" href="./app.html">Open the app</a>
+      <a class="btn btn-ghost" href="#how">How it works</a>
+    </div>
+    <p class="note">Reads are open to anyone. Staking needs a wallet on Bradbury.</p>
 
-// ---------------------------------------------------------------------------
-// Everything chain-specific lives in this one block. To launch on mainnet, set
-// NETWORK = "mainnet" and fill in the mainnet entry -- nothing else in this file
-// refers to a network, an RPC, an explorer or a contract address directly.
-//
-// The SDK ships no mainnet chain definition (it exports only localnet, studionet,
-// testnetAsimov, testnetBradbury), so a non-Bradbury network is built by
-// extending the Bradbury definition -- .extend() keeps the consensus contract and
-// its ABI, which a hand-written { id, rpcUrls } literal would lose.
-// ---------------------------------------------------------------------------
-const NETWORKS = {
-  bradbury: {
-    label: "Bradbury testnet",
-    chainId: 4221,
-    rpcUrl: "https://rpc-bradbury.genlayer.com",
-    explorer: "https://explorer-bradbury.genlayer.com",
-    contract: "0x203F67178a7B25803854D179d72Bf40Cfcdc2c88",
-    nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-  },
-  // mainnet: {
-  //   label: "GenLayer",
-  //   chainId: 0,                 // <- mainnet chain id
-  //   rpcUrl: "https://...",      // <- mainnet RPC
-  //   explorer: "https://...",    // <- mainnet explorer
-  //   contract: "0x...",          // <- the contract deployed on mainnet
-  //   nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
-  // },
-};
-const NETWORK = "bradbury";
-const CFG = NETWORKS[NETWORK];
-const EXPLORER = CFG.explorer + "/transaction/";
+    <div class="preview">
+      <div class="pv">
+        <div class="pv-top">
+          <span class="tag t-settled" style="background:#2FD98A1A;color:var(--yes);border:1px solid #2FD98A33">SETTLED</span>
+          <span class="tag" style="background:#2FD98A1A;color:var(--yes)">YES</span>
+          <span class="tag mono" style="background:var(--surface-3);color:var(--mut)">milestone-2</span>
+        </div>
+        <h3>At least one pull request has been merged into this repository.</h3>
+        <div class="pv-meta">
+          <span class="mono">genlayerlabs/genlayer-js</span><span>·</span><span>deadline 2026-10-16 11:08 UTC</span>
+        </div>
+        <div class="pv-bar"><i style="width:62.5%"></i></div>
+        <div class="pv-row"><span class="y">YES 0.5</span><span>0.8 GEN staked</span><span class="n">0.3 NO</span></div>
+        <div class="pv-quote">
+          <span class="micro">AI consensus — why</span>
+          Pull Request #223 was successfully merged into the repository on 2026-09-28T16:22:12Z, which satisfies the success criteria of having at least one merged pull request before the milestone deadline.
+        </div>
+      </div>
+      <p class="pv-cap">A real market from the deployed contract, resolved by AI consensus.</p>
+    </div>
 
-// The SDK's own definition is preferred when it matches, because it carries the
-// consensus contract; otherwise extend Bradbury to the target chain.
-function chainFor(cfg) {
-  if (cfg.chainId === testnetBradbury.id) return testnetBradbury;
-  return testnetBradbury.extend({
-    id: cfg.chainId,
-    name: cfg.label,
-    rpcUrls: { default: { http: [cfg.rpcUrl] } },
-  });
-}
+    <div class="stats">
+      <div class="stat"><span class="micro">Evidence source</span><b>the repo</b><div class="sub">not a creator-chosen URL</div></div>
+      <div class="stat"><span class="micro">Settlement</span><b>AI consensus</b><div class="sub">comparative, multi-validator</div></div>
+      <div class="stat"><span class="micro">Payout</span><b>on-chain</b><div class="sub">parimutuel, native GEN</div></div>
+      <div class="stat"><span class="micro">Tests</span><b>27</b><div class="sub">fund-safety guards mutation-checked</div></div>
+    </div>
+  </div>
+</div>
 
-// Payouts are EXTERNAL messages: they execute on FINALIZATION, not on acceptance.
-// Measured on Bradbury, finalization ran ~20 min to ~2.4 h, so the UI must never
-// present a submitted claim as failed -- it polls until the balance moves.
-const PAYOUT_POLLS = 40;          // 40 x 90s = ~1 hour of watching
-const PAYOUT_POLL_MS = 90000;
+<hr class="hr" />
 
-// GenLayer has no gas estimation on its RPC, so every write carries an explicit
-// limit. Too low reverts with "intrinsic gas too low"; this is the value the
-// deploy and every write in the tests use.
-const GAS = 5000000n;
+<div class="wrap">
+  <section id="why">
+    <div class="shead">
+      <span class="micro">The problem</span>
+      <h2>A market on “did this ship on time” can’t be settled by a price feed.</h2>
+      <p>
+        The answer lives in code — merge dates, whether the tests actually exist, whether the
+        file the milestone named is really in the tree. Settling it means reading and judging
+        unstructured evidence. That is the whole difficulty, and it is why most such markets
+        quietly fall back to a human deciding.
+      </p>
+    </div>
 
-// Consensus is non-deterministic: any round can come back LEADER_TIMEOUT or
-// VALIDATORS_TIMEOUT before one reaches AGREE. Too small a budget orphans the
-// market, so we drive it properly and then keep polling for a late commit.
-const RESOLVE_ROUNDS = 12;
-const POLL_AFTER = 45;        // ~3 minutes of late-commit polling
-const POLL_EVERY_MS = 4000;
-// A market the validators never resolve can be voided once the deadline is
-// this far past, so staker GEN is never held forever.
-const VOID_GRACE_DAYS = 30;
-const VOID_GRACE = VOID_GRACE_DAYS * 24 * 3600;
+    <table class="vs">
+      <tr><th></th><th>A market resolved from a cited URL</th><th>MilestoneMarkets</th></tr>
+      <tr><td>Who picks the evidence</td><td class="bad">the market creator</td><td class="good">nobody — the contract builds the queries from the repo name</td></tr>
+      <tr><td>What validators read</td><td class="bad">whatever the creator pointed at</td><td class="good">commits, merged PRs and the file tree</td></tr>
+      <tr><td>Trust assumption</td><td class="bad">the creator chose an honest source</td><td class="good">the repository is the source</td></tr>
+      <tr><td>If validators disagree</td><td class="bad">the link decides</td><td class="good">the market stays open and retryable — it never guesses</td></tr>
+    </table>
+  </section>
+</div>
 
-const el = (id) => document.getElementById(id);
-const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function fmtGen(wei) {
-  const n = Number(wei) / 1e18;
-  if (!isFinite(n) || n === 0) return "0";
-  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
-}
+<hr class="hr" />
 
-function log(msg, hash, cls) {
-  const d = document.createElement("div");
-  if (cls) d.className = cls;
-  d.innerHTML = esc(msg) + (hash ? ' — <a href="' + EXPLORER + esc(hash) + '" target="_blank" rel="noopener">' + esc(hash) + "</a>" : "");
-  const box = el("log");
-  if (box.firstChild && box.firstChild.textContent === "Idle.") box.innerHTML = "";
-  box.prepend(d);
-}
+<div class="wrap">
+  <section id="how">
+    <div class="shead">
+      <span class="micro">How it works</span>
+      <h2>Four steps, no human in the loop.</h2>
+      <p>Every step below is a real transaction on the deployed contract.</p>
+    </div>
 
-let client = createClient({ chain: chainFor(CFG) });
-let account = null;
+    <div class="cards two">
+      <div class="box">
+        <span class="num">1</span>
+        <h3>Open a market</h3>
+        <p><span class="mono">createMarket(repo, criteria, deadline)</span> — that is the entire input. There is no field for an evidence URL, so no creator can choose what gets read.</p>
+      </div>
+      <div class="box">
+        <span class="num">2</span>
+        <h3>Stake YES or NO</h3>
+        <p>GEN goes into a parimutuel pool. Staking closes the moment the deadline passes, and the odds preview on the app updates as you type.</p>
+      </div>
+      <div class="box">
+        <span class="num">3</span>
+        <h3>The validators judge</h3>
+        <p>After the deadline, <em>every</em> validator independently fetches the repository and runs the same evaluator prompt. Comparative consensus reconciles their verdicts.</p>
+      </div>
+      <div class="box">
+        <span class="num">4</span>
+        <h3>Winners get paid</h3>
+        <p>The pool is split in proportion to each winner's stake and paid in native GEN. If the winning side drew no stake, the market voids and everyone is refunded instead.</p>
+      </div>
+    </div>
 
-el("addr").textContent = CFG.contract;
-el("net").textContent = CFG.label + " · chain " + CFG.chainId;
-el("explorer").href = CFG.explorer;
-el("explorer").textContent = CFG.explorer.replace(/^https?:\/\//, "");
+    <div style="margin-top:34px">
+      <span class="micro" style="display:block;margin-bottom:12px">The evaluator prompt — sent to every validator, verbatim</span>
+      <pre><span class="c"># the repository digest is built by the contract, not supplied by the caller</span>
+You are an expert software engineer acting as an autonomous GenLayer validator.
+Your task is to objectively determine if an open-source development milestone
+has been successfully achieved.
 
-// ------------------------------------------------------------------ wallet
-// Writes must go through the wallet ON the right chain. Without this the wallet
-// signs against whatever network it happens to be on and the tx goes nowhere.
-async function ensureChain() {
-  const want = "0x" + CFG.chainId.toString(16);
-  const cur = await window.ethereum.request({ method: "eth_chainId" });
-  if (String(cur).toLowerCase() === want.toLowerCase()) return;
-  try {
-    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
-  } catch (e) {
-    // 4902 = the wallet has never seen this chain; offer to add it.
-    if (e && (e.code === 4902 || e.code === -32603)) {
-      await window.ethereum.request({
-        method: "wallet_addEthereumChain",
-        params: [{
-          chainId: want,
-          chainName: CFG.label,
-          rpcUrls: [CFG.rpcUrl],
-          nativeCurrency: CFG.nativeCurrency,
-          blockExplorerUrls: [CFG.explorer],
-        }],
-      });
-    } else {
-      throw e;
-    }
-  }
-}
+<span class="k">### DATA SOURCED FROM GITHUB:</span>
+&lt;commits · merged pull requests · file tree&gt;
+MILESTONE DEADLINE (UTC): &lt;iso&gt;
 
-async function connect() {
-  if (!window.ethereum) { log("No injected wallet found. Install a browser wallet to stake."); return; }
-  let accts = await window.ethereum.request({ method: "eth_accounts" });
-  if (!accts || accts.length === 0) accts = await window.ethereum.request({ method: "eth_requestAccounts" });
-  account = accts[0];
-  try {
-    await ensureChain();
-  } catch (e) {
-    log("Could not switch the wallet to " + CFG.label + ": " + (e && e.message ? e.message : e));
-    return;
-  }
-  // account MUST be an address string + provider, or writes sign with a local key
-  client = createClient({ chain: chainFor(CFG), account, provider: window.ethereum });
-  el("who").textContent = "Connected: " + account + " on " + CFG.label;
-  log("Wallet connected on " + CFG.label + ".");
-  loadMarkets();
-}
+<span class="k">### SUCCESS CRITERIA TO EVALUATE:</span>
+"&lt;criteria&gt;"
 
-// ------------------------------------------------------------------- reads
-// getMarket returns JSON, not a delimited string: the criteria is stored
-// verbatim, so a separator character inside it must not shift the other fields.
-function parseMarket(row) {
-  let o = {};
-  try { o = typeof row === "string" ? JSON.parse(row) : (row || {}); } catch (e) { o = {}; }
-  if (!o.exists) return { exists: false };
-  return {
-    repo: o.repo || "", milestone: o.milestone || "", status: o.status || "",
-    outcome: o.outcome || "", deadline: Number(o.deadline || 0),
-    pool: o.pool != null ? String(o.pool) : "0",
-    reasoning: o.reasoning || "",
-    yesPool: Number(o.yes_pool || 0), noPool: Number(o.no_pool || 0),
-  };
-}
+<span class="k">### RULES FOR EVALUATION:</span>
+1. Base your evaluation strictly on the provided GitHub data. Do not hallucinate.
+2. The code must be explicitly merged or completed within the repository text.
+3. If the criteria mentions specific requirements (tests, files, features),
+   verify they actually exist. Empty files or uncompleted PRs count as a failure.
+4. The milestone must have been completed ON OR BEFORE the deadline. A merge
+   dated after the deadline is late and counts as NO.
 
-// positions look like "addr:SIDE:amount|addr:SIDE:amount"
-function parsePositions(pos) {
-  const out = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
-  for (const p of String(pos || "").split("|")) {
-    if (!p) continue;
-    const bits = p.split(":");
-    if (bits.length < 3) continue;
-    const who = bits[0], side = bits[1], amt = Number(bits[2]) || 0;
-    if (side === "YES") out.yes += amt;
-    else if (side === "NO") out.no += amt;
-    if (account && who.toLowerCase() === account.toLowerCase()) out.mine[side] += amt;
-  }
-  return out;
-}
+<span class="k">### OUTPUT FORMAT:</span>
+Reply in valid JSON with exactly two keys: "outcome" and "reasoning".
+The "outcome" value must be strictly either "YES" or "NO".</pre>
+    </div>
+  </section>
+</div>
 
-async function loadMarkets() {
-  el("markets").innerHTML = '<div class="card muted">Loading markets…</div>';
-  try {
-    const count = Number(await client.readContract({ address: CFG.contract, functionName: "getCount", args: [] }));
-    if (!count) { el("markets").innerHTML = '<div class="card muted">No markets yet. Open the first one above.</div>'; return; }
-    let html = "";
-    for (let i = count; i >= 1; i--) {
-      const id = "milestone-" + i;
-      const m = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
-      const pos = parsePositions(await client.readContract({ address: CFG.contract, functionName: "getPositions", args: [id] }));
-      const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : m.status === "VOID" ? "void" : "ok";
-      const ocls = m.outcome === "YES" ? "ok" : m.outcome === "NO" ? "no" : "dim";
-      const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
-      const past = m.deadline > 0 && Date.now() / 1000 > m.deadline;
+<hr class="hr" />
 
-      html += '<div class="m" data-id="' + esc(id) + '" data-pools=\'' + JSON.stringify(pos) + "'>";
-      html += "<h3>" + esc(m.milestone || "(no criteria)") + "</h3>";
-      html += '<div class="meta">' + esc(m.repo) + " · id " + esc(id) + " · deadline " + esc(when) + "</div>";
-      html += '<div class="row" style="margin-top:8px;">Status <span class="badge ' + cls + '">' + esc(m.status || "-") + "</span>";
-      html += 'Outcome <span class="badge ' + ocls + '">' + esc(m.outcome || "—") + "</span>";
-      html += '<span class="muted" style="font-size:.82rem;">pool ' + fmtGen(m.pool) + " GEN · YES " + fmtGen(pos.yes) + " · NO " + fmtGen(pos.no) + "</span></div>";
-      if (m.reasoning) html += '<div class="reason">' + esc(m.reasoning) + "</div>";
+<div class="wrap">
+  <section id="proof">
+    <div class="shead">
+      <span class="micro">Proof, not claims</span>
+      <h2>Both directions, and the money actually moved.</h2>
+      <p>Same repository, same contract — only the criteria differ. Then a full lifecycle with two distinct funded accounts, measuring real balances.</p>
+    </div>
 
-      if (m.status === "OPEN") {
-        html += '<div class="stake">';
-        if (past) {
-          html += '<div class="row"><button class="small" data-act="resolve" data-id="' + esc(id) + '">Resolve now</button>';
-          html += '<span class="muted" style="font-size:.82rem;">Deadline passed — validators can judge the repo.</span></div>';
-          if (m.deadline > 0 && Date.now() / 1000 > m.deadline + VOID_GRACE) {
-            html += '<div class="row" style="margin-top:8px;"><button class="small ghost" data-act="void" data-id="' + esc(id) + '">Void &amp; refund</button>';
-            html += '<span class="muted" style="font-size:.82rem;">Unresolved ' + VOID_GRACE_DAYS + ' days past the deadline — everyone takes their stake back.</span></div>';
-          }
-        } else {
-          html += "<label>Stake amount (GEN)</label><div class=\"row\">";
-          html += '<input class="amt" data-id="' + esc(id) + '" type="number" min="0" step="0.001" value="1" />';
-          html += '<button class="small" data-act="stake-yes" data-id="' + esc(id) + '">Stake YES</button>';
-          html += '<button class="small ghost" data-act="stake-no" data-id="' + esc(id) + '">Stake NO</button>';
-          html += "</div>";
-          html += '<div class="odds" data-odds="' + esc(id) + '"></div>';
-        }
-        html += "</div>";
-      } else if (m.status === "RESOLVED") {
-        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button></div>';
-      } else {
-        const isVoid = m.status === "VOID";
-        // A claim that has been made is NOT a payout that has arrived: the GEN
-        // rides an external transfer that only executes on finalization.
-        let claimed = "0";
-        if (account) {
-          try { claimed = String(await client.readContract({ address: CFG.contract, functionName: "isClaimed", args: [id, account] })); } catch (e) {}
-        }
-        if (claimed === "1") {
-          html += '<div class="row" style="margin-top:10px;"><span class="badge warn">CLAIMED</span>';
-          html += '<span class="muted" style="font-size:.82rem;">payout settles when the transaction finalizes (tens of minutes; measured 20 min – 2.4 h) — watch the explorer, not this page.</span></div>';
-        } else {
-          html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
-          if (account) {
-            const p = await client.readContract({ address: CFG.contract, functionName: "previewPayout", args: [id, account] });
-            html += '<span class="muted" style="font-size:.82rem;">' + (isVoid ? "refund" : "your payout") + ": " + fmtGen(p) + " GEN</span>";
-          }
-          html += "</div>";
-        }
-      }
-      html += "</div>";
-    }
-    el("markets").innerHTML = html;
-    document.querySelectorAll("input.amt").forEach((inp) => paintOdds(inp.dataset.id));
-  } catch (e) {
-    el("markets").innerHTML = '<div class="card">Read failed: ' + esc(e && e.message ? e.message : e) + "</div>";
-  }
-}
+    <div class="proof">
+      <div class="pr">
+        <span class="tag t-yes">RESOLVED YES</span>
+        <p>“At least one pull request has been merged into this repository.”</p>
+        <p>The validators found the merge and cited its date against the deadline.</p>
+        <span class="mono">0xa821e44c41253231fa6d4d174bdaf1b330a2c24ec123aa582b34e55896f5369f</span>
+      </div>
+      <div class="pr">
+        <span class="tag t-no">RESOLVED NO</span>
+        <p>“A quantum teleportation module exists at /src/quantum.py with full unit tests.”</p>
+        <p>The file tree settled it — the path is not in the repository, and no commit message could pretend otherwise.</p>
+        <span class="mono">0x1d29c62ce933ba1519504be57bb7523bbc891763dcc1dbded53973c35f5c425c</span>
+      </div>
+    </div>
 
-// ------------------------------------------------------------- odds preview
-// Parimutuel: winners split the whole pool in proportion to their winning stake.
-function payoutIfWin(stake, sidePool, otherPool, mySideStake) {
-  const winningPool = sidePool + stake;
-  const total = sidePool + otherPool + stake;
-  if (winningPool <= 0) return 0;
-  return ((mySideStake + stake) * total) / winningPool;
-}
+    <div class="delta">
+      <span class="micro" style="display:block;margin-bottom:10px">Payout — real balance deltas, not bookkeeping</span>
+      <span class="mono">contract &nbsp;0.800000 GEN &nbsp;→&nbsp; 0.000000 GEN</span>
+      <span class="mono">winner &nbsp;&nbsp;1.499777 GEN &nbsp;→&nbsp; 2.299777 GEN</span>
+      <span class="mono" style="margin-top:8px">both deltas exactly the payout &nbsp;·&nbsp; <b>+0.800000 GEN</b></span>
+    </div>
+  </section>
+</div>
 
-function paintOdds(id) {
-  const box = document.querySelector('[data-odds="' + id + '"]');
-  const inp = document.querySelector('input.amt[data-id="' + id + '"]');
-  if (!box || !inp) return;
-  const node = inp.closest(".m");
-  if (!node) return;
-  let pools = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
-  try { pools = JSON.parse(node.dataset.pools || "{}"); } catch (e) {}
-  if (!pools.mine) pools.mine = { YES: 0, NO: 0 };
+<div class="wrap" style="padding-bottom:70px">
+  <div class="final">
+    <h2>Open a market on anything that ships.</h2>
+    <p>Point it at a repository, write the criteria, set the deadline. The validators do the rest.</p>
+    <a class="btn btn-primary" href="./app.html">Open the app</a>
+  </div>
+</div>
 
-  const gen = Number(inp.value || 0);
-  if (!isFinite(gen) || gen <= 0) { box.innerHTML = '<span class="muted">Enter an amount to see the payout.</span>'; return; }
-  const stake = gen * 1e18;
+<footer>
+  <div class="wrap inner">
+    <span>MilestoneMarkets · open-source delivery markets on GenLayer</span>
+    <div class="row">
+      <a href="./app.html">App</a>
+      <a href="https://github.com/Adebisi1111/milestone-markets" target="_blank" rel="noopener">Source</a>
+      <a href="https://explorer-bradbury.genlayer.com/address/0x203F67178a7B25803854D179d72Bf40Cfcdc2c88" target="_blank" rel="noopener">Contract</a>
+    </div>
+  </div>
+</footer>
 
-  const yPayout = payoutIfWin(stake, pools.yes || 0, pools.no || 0, pools.mine.YES || 0);
-  const nPayout = payoutIfWin(stake, pools.no || 0, pools.yes || 0, pools.mine.NO || 0);
-  const yProfit = yPayout - ((pools.mine.YES || 0) + stake);
-  const nProfit = nPayout - ((pools.mine.NO || 0) + stake);
-  const roi = (v) => (stake > 0 ? Math.round((v / stake) * 100) : 0);
-
-  box.innerHTML =
-    "Stake " + fmtGen(stake) + " GEN → " +
-    "if <b>YES</b> wins: <b>+" + fmtGen(Math.max(0, yProfit)) + " GEN</b> (" + roi(Math.max(0, yProfit)) + "% ROI) · " +
-    "if NO wins: <i>-" + fmtGen(stake) + " GEN</i><br>" +
-    "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
-    "if <b>NO</b> wins: <b>+" + fmtGen(Math.max(0, nProfit)) + " GEN</b> (" + roi(Math.max(0, nProfit)) + "% ROI) · " +
-    "if YES wins: <i>-" + fmtGen(stake) + " GEN</i>";
-}
-
-// ------------------------------------------------------------------ writes
-async function write(fn, args, value = 0n) {
-  if (!account) { log("Connect a wallet first."); return null; }
-  try {
-    log("Sending " + fn + "…");
-    const hash = await client.writeContract({ address: CFG.contract, functionName: fn, args, value, gasLimit: GAS });
-    log(fn + " sent", hash);
-    const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
-    log(fn + " status " + (rc && rc.status), hash);
-    return rc;
-  } catch (e) {
-    log(fn + " failed: " + (e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : e));
-    return null;
-  }
-}
-
-// Drive consensus with a real retry budget, then poll for a late commit.
-async function resolveWithRetry(id) {
-  if (!account) { log("Connect a wallet first."); return; }
-  for (let round = 1; round <= RESOLVE_ROUNDS; round++) {
-    log("AI validators reaching consensus — round " + round + " of " + RESOLVE_ROUNDS + "…", null, "prog");
-    const rc = await write("resolve", [id]);
-    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
-    if (row.outcome === "YES" || row.outcome === "NO") {
-      log("Resolved " + id + ": " + row.outcome, null, "prog");
-      await loadMarkets();
-      return;
-    }
-    if (rc && rc.status !== 5) await sleep(5000);
-  }
-  log("Consensus is unusually slow — the market is saved on-chain and still OPEN. Polling for a late commit…", null, "prog");
-  for (let i = 0; i < POLL_AFTER; i++) {
-    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
-    if (row.outcome === "YES" || row.outcome === "NO") {
-      log("Late commit landed: " + id + " = " + row.outcome, null, "prog");
-      await loadMarkets();
-      return;
-    }
-    await sleep(POLL_EVERY_MS);
-  }
-  log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN, and once it is " + VOID_GRACE_DAYS + " days past the deadline anyone can void it for a full refund.");
-  await loadMarkets();
-}
-
-// A claim is an EXTERNAL message: the GEN does not move when the transaction is
-// accepted, only when it FINALIZES (measured 20 min to 2.4 h on Bradbury). So a
-// submitted claim is never reported as a failure -- the UI watches the wallet
-// balance until the payout actually lands.
-async function claimAndTrack(id) {
-  if (!account) { log("Connect a wallet first."); return; }
-  let before = 0n;
-  try { before = BigInt(await client.getBalance({ address: account })); } catch (e) {}
-  const rc = await write("claim", [id]);
-  if (!rc) return;
-  log("Claim accepted. The payout is an external transfer and executes when the transaction FINALIZES — tens of minutes (measured 20 min to 2.4 h). Watching your balance…", null, "prog");
-  await loadMarkets();
-  for (let i = 1; i <= PAYOUT_POLLS; i++) {
-    await sleep(PAYOUT_POLL_MS);
-    let now = before;
-    try { now = BigInt(await client.getBalance({ address: account })); } catch (e) {}
-    if (now > before) {
-      log("Payout landed: +" + fmtGen(now - before) + " GEN", null, "prog");
-      await loadMarkets();
-      return;
-    }
-    if (i % 4 === 0) log("Still waiting for finalization (" + Math.round((i * PAYOUT_POLL_MS) / 60000) + " min)…", null, "prog");
-  }
-  log("Not finalized after ~1 h. Nothing is lost — the transfer is queued and executes on finalization; check the explorer for the claim transaction.", null, "prog");
-  await loadMarkets();
-}
-
-// ------------------------------------------------------------------ events
-el("btnConnect").addEventListener("click", connect);
-el("btnRefresh").addEventListener("click", loadMarkets);
-
-el("btnCreate").addEventListener("click", async () => {
-  const repo = el("repo").value.trim();
-  const milestone = el("milestone").value.trim();
-  const dt = el("deadline").value;
-  if (!repo || !milestone || !dt) { log("Repository, criteria and deadline are all required."); return; }
-  const deadline = BigInt(Math.floor(new Date(dt).getTime() / 1000));
-  await write("createMarket", [repo, milestone, deadline]);
-  await loadMarkets();
-});
-
-el("markets").addEventListener("input", (ev) => {
-  if (ev.target.classList && ev.target.classList.contains("amt")) paintOdds(ev.target.dataset.id);
-});
-
-el("markets").addEventListener("click", async (ev) => {
-  const btn = ev.target.closest("button[data-act]");
-  if (!btn) return;
-  const id = btn.dataset.id;
-  const act = btn.dataset.act;
-
-  if (act === "stake-yes" || act === "stake-no") {
-    const inp = document.querySelector('input.amt[data-id="' + id + '"]');
-    const gen = Number(inp && inp.value);
-    if (!gen || gen <= 0) { log("Enter a stake amount above zero."); return; }
-    const side = act === "stake-yes" ? "YES" : "NO";
-    btn.disabled = true;
-    await write("stake", [id, side], BigInt(Math.round(gen * 1e18)));
-    await loadMarkets();
-    return;
-  }
-  if (act === "resolve") return resolveWithRetry(id);
-  if (act === "settle") { await write("settle", [id]); return loadMarkets(); }
-  if (act === "claim") { await claimAndTrack(id); return; }
-  if (act === "void") { await write("void", [id]); return loadMarkets(); }
-});
-
-loadMarkets();
-</script>
 </body>
 </html>

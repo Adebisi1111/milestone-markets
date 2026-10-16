@@ -182,7 +182,8 @@ GLPASS=<keystore-password> node deploy.mjs
 |---|---|
 | Contract (Bradbury, chain 4221) | `0x203F67178a7B25803854D179d72Bf40Cfcdc2c88` |
 | Explorer | https://explorer-bradbury.genlayer.com/address/0x203F67178a7B25803854D179d72Bf40Cfcdc2c88 |
-| Live app | https://adebisi1111.github.io/milestone-markets/ |
+| Live app | https://adebisi1111.github.io/milestone-markets/app.html |
+| Landing | https://adebisi1111.github.io/milestone-markets/ |
 | Repository | https://github.com/Adebisi1111/milestone-markets |
 
 **Deployed source == published source.** `genlayer-js getContractCode` on the

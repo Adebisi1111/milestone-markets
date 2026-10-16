@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>MilestoneMarkets — bet on open-source delivery</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b0e14; --card:#131824; --line:#222a3a; --ink:#e8ecf1; --mut:#9aa4b2; --acc:#4c7dff; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--ink); margin:0; padding:20px; line-height:1.5; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size:1.5rem; margin:0 0 4px; }
+  .sub { color:var(--mut); margin:0 0 18px; font-size:.94rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  label { font-size:.78rem; color:var(--mut); display:block; margin:0 0 5px; }
+  input, select { width:100%; background:var(--bg); border:1px solid #2a3346; color:var(--ink); border-radius:10px; padding:10px 12px; font-size:.95rem; }
+  .grid { display:grid; gap:10px; grid-template-columns:1fr; }
+  @media (min-width:640px){ .grid.two { grid-template-columns:1fr 1fr; } }
+  button { background:var(--acc); color:#fff; border:0; border-radius:10px; padding:10px 16px; font-weight:600; cursor:pointer; font-size:.92rem; }
+  button:hover { background:#3a6bf0; }
+  button.ghost { background:#1c2432; color:var(--ink); }
+  button.small { padding:7px 12px; font-size:.85rem; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .muted { color:var(--mut); }
+  .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:.78rem; font-weight:700; }
+  .ok { background:#10391f; color:#4ade80; } .no { background:#3a1414; color:#f87171; }
+  .warn { background:#3a2f10; color:#facc15; } .dim { background:#1c2432; color:var(--mut); }
+  .void { background:#2a1a3a; color:#c084fc; }
+  .m { border:1px solid var(--line); border-radius:12px; padding:14px; background:#0f1420; margin-bottom:12px; }
+  .m h3 { margin:0 0 4px; font-size:1rem; word-break:break-word; }
+  .meta { font-size:.82rem; color:var(--mut); word-break:break-all; }
+  .reason { background:var(--bg); border-left:3px solid var(--acc); padding:8px 12px; border-radius:6px; margin-top:10px; font-size:.88rem; color:#c7d0dc; }
+  .stake { margin-top:12px; padding-top:12px; border-top:1px dashed #26304a; }
+  .stake .row { align-items:flex-end; }
+  .stake input { max-width:180px; }
+  .odds { font-size:.85rem; color:#c7d0dc; margin-top:9px; line-height:1.6; }
+  .odds b { color:#4ade80; } .odds i { color:#f87171; font-style:normal; }
+  #log { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.82rem; max-height:240px; overflow:auto; }
+  #log div { padding:3px 0; border-bottom:1px solid #1a2130; word-break:break-all; }
+  #log div.prog { color:#facc15; }
+  a { color:#8ab4ff; word-break:break-all; }
+  .foot { color:#6b7686; font-size:.8rem; margin-top:10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MilestoneMarkets</h1>
+  <p class="sub">
+    Bet YES or NO on whether a repository ships a milestone by a deadline.
+    GenLayer's AI validators read the repo's own commits, pull requests and files to decide —
+    nobody picks the evidence, not even the market creator.
+  </p>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;">
+      <div>
+        <div class="muted" style="font-size:.78rem;">Contract</div>
+        <div id="addr" class="meta"></div>
+        <div id="net" class="meta" style="margin-top:2px;"></div>
+      </div>
+      <div class="row">
+        <button id="btnConnect" class="ghost">Connect wallet</button>
+        <button id="btnRefresh">Refresh</button>
+      </div>
+    </div>
+    <div id="who" class="meta" style="margin-top:8px;">Not connected — you can browse, but staking needs a wallet.</div>
+  </div>
+
+  <div class="card">
+    <h2 style="font-size:1.05rem;margin:0 0 10px;">Open a market</h2>
+    <div class="grid two">
+      <div><label>Repository (owner/name)</label><input id="repo" placeholder="genlayerlabs/genlayer-js" /></div>
+      <div><label>Milestone deadline</label><input id="deadline" type="datetime-local" /></div>
+    </div>
+    <div style="margin-top:10px;"><label>Success criteria</label><input id="milestone" placeholder="Ship TypeScript typings for readContract, with tests, merged into main" /></div>
+    <div class="row" style="margin-top:12px;">
+      <button id="btnCreate">Create market</button>
+      <span class="muted" style="font-size:.82rem;">Deadline is the "on time" half — a merge dated after it counts as NO.</span>
+    </div>
+  </div>
+
+  <div id="markets"></div>
+  <div class="card"><label>Activity</label><div id="log" class="muted"><div>Idle.</div></div></div>
+  <p class="foot">
+    Reads via genlayer-js · Explorer:
+    <a id="explorer" href="#" target="_blank" rel="noopener"></a>
+  </p>
+</div>
+
+<script type="module">
+import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
+import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
+
+// ---------------------------------------------------------------------------
+// Everything chain-specific lives in this one block. To launch on mainnet, set
+// NETWORK = "mainnet" and fill in the mainnet entry -- nothing else in this file
+// refers to a network, an RPC, an explorer or a contract address directly.
+//
+// The SDK ships no mainnet chain definition (it exports only localnet, studionet,
+// testnetAsimov, testnetBradbury), so a non-Bradbury network is built by
+// extending the Bradbury definition -- .extend() keeps the consensus contract and
+// its ABI, which a hand-written { id, rpcUrls } literal would lose.
+// ---------------------------------------------------------------------------
+const NETWORKS = {
+  bradbury: {
+    label: "Bradbury testnet",
+    chainId: 4221,
+    rpcUrl: "https://rpc-bradbury.genlayer.com",
+    explorer: "https://explorer-bradbury.genlayer.com",
+    contract: "0x203F67178a7B25803854D179d72Bf40Cfcdc2c88",
+    nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  },
+  // mainnet: {
+  //   label: "GenLayer",
+  //   chainId: 0,                 // <- mainnet chain id
+  //   rpcUrl: "https://...",      // <- mainnet RPC
+  //   explorer: "https://...",    // <- mainnet explorer
+  //   contract: "0x...",          // <- the contract deployed on mainnet
+  //   nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  // },
+};
+const NETWORK = "bradbury";
+const CFG = NETWORKS[NETWORK];
+const EXPLORER = CFG.explorer + "/transaction/";
+
+// The SDK's own definition is preferred when it matches, because it carries the
+// consensus contract; otherwise extend Bradbury to the target chain.
+function chainFor(cfg) {
+  if (cfg.chainId === testnetBradbury.id) return testnetBradbury;
+  return testnetBradbury.extend({
+    id: cfg.chainId,
+    name: cfg.label,
+    rpcUrls: { default: { http: [cfg.rpcUrl] } },
+  });
+}
+
+// Payouts are EXTERNAL messages: they execute on FINALIZATION, not on acceptance.
+// Measured on Bradbury, finalization ran ~20 min to ~2.4 h, so the UI must never
+// present a submitted claim as failed -- it polls until the balance moves.
+const PAYOUT_POLLS = 40;          // 40 x 90s = ~1 hour of watching
+const PAYOUT_POLL_MS = 90000;
+
+// GenLayer has no gas estimation on its RPC, so every write carries an explicit
+// limit. Too low reverts with "intrinsic gas too low"; this is the value the
+// deploy and every write in the tests use.
+const GAS = 5000000n;
+
+// Consensus is non-deterministic: any round can come back LEADER_TIMEOUT or
+// VALIDATORS_TIMEOUT before one reaches AGREE. Too small a budget orphans the
+// market, so we drive it properly and then keep polling for a late commit.
+const RESOLVE_ROUNDS = 12;
+const POLL_AFTER = 45;        // ~3 minutes of late-commit polling
+const POLL_EVERY_MS = 4000;
+// A market the validators never resolve can be voided once the deadline is
+// this far past, so staker GEN is never held forever.
+const VOID_GRACE_DAYS = 30;
+const VOID_GRACE = VOID_GRACE_DAYS * 24 * 3600;
+
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function fmtGen(wei) {
+  const n = Number(wei) / 1e18;
+  if (!isFinite(n) || n === 0) return "0";
+  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function log(msg, hash, cls) {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.innerHTML = esc(msg) + (hash ? ' — <a href="' + EXPLORER + esc(hash) + '" target="_blank" rel="noopener">' + esc(hash) + "</a>" : "");
+  const box = el("log");
+  if (box.firstChild && box.firstChild.textContent === "Idle.") box.innerHTML = "";
+  box.prepend(d);
+}
+
+let client = createClient({ chain: chainFor(CFG) });
+let account = null;
+
+el("addr").textContent = CFG.contract;
+el("net").textContent = CFG.label + " · chain " + CFG.chainId;
+el("explorer").href = CFG.explorer;
+el("explorer").textContent = CFG.explorer.replace(/^https?:\/\//, "");
+
+// ------------------------------------------------------------------ wallet
+// Writes must go through the wallet ON the right chain. Without this the wallet
+// signs against whatever network it happens to be on and the tx goes nowhere.
+async function ensureChain() {
+  const want = "0x" + CFG.chainId.toString(16);
+  const cur = await window.ethereum.request({ method: "eth_chainId" });
+  if (String(cur).toLowerCase() === want.toLowerCase()) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+  } catch (e) {
+    // 4902 = the wallet has never seen this chain; offer to add it.
+    if (e && (e.code === 4902 || e.code === -32603)) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: want,
+          chainName: CFG.label,
+          rpcUrls: [CFG.rpcUrl],
+          nativeCurrency: CFG.nativeCurrency,
+          blockExplorerUrls: [CFG.explorer],
+        }],
+      });
+    } else {
+      throw e;
+    }
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) { log("No injected wallet found. Install a browser wallet to stake."); return; }
+  let accts = await window.ethereum.request({ method: "eth_accounts" });
+  if (!accts || accts.length === 0) accts = await window.ethereum.request({ method: "eth_requestAccounts" });
+  account = accts[0];
+  try {
+    await ensureChain();
+  } catch (e) {
+    log("Could not switch the wallet to " + CFG.label + ": " + (e && e.message ? e.message : e));
+    return;
+  }
+  // account MUST be an address string + provider, or writes sign with a local key
+  client = createClient({ chain: chainFor(CFG), account, provider: window.ethereum });
+  el("who").textContent = "Connected: " + account + " on " + CFG.label;
+  log("Wallet connected on " + CFG.label + ".");
+  loadMarkets();
+}
+
+// ------------------------------------------------------------------- reads
+// getMarket returns JSON, not a delimited string: the criteria is stored
+// verbatim, so a separator character inside it must not shift the other fields.
+function parseMarket(row) {
+  let o = {};
+  try { o = typeof row === "string" ? JSON.parse(row) : (row || {}); } catch (e) { o = {}; }
+  if (!o.exists) return { exists: false };
+  return {
+    repo: o.repo || "", milestone: o.milestone || "", status: o.status || "",
+    outcome: o.outcome || "", deadline: Number(o.deadline || 0),
+    pool: o.pool != null ? String(o.pool) : "0",
+    reasoning: o.reasoning || "",
+    yesPool: Number(o.yes_pool || 0), noPool: Number(o.no_pool || 0),
+  };
+}
+
+// positions look like "addr:SIDE:amount|addr:SIDE:amount"
+function parsePositions(pos) {
+  const out = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
+  for (const p of String(pos || "").split("|")) {
+    if (!p) continue;
+    const bits = p.split(":");
+    if (bits.length < 3) continue;
+    const who = bits[0], side = bits[1], amt = Number(bits[2]) || 0;
+    if (side === "YES") out.yes += amt;
+    else if (side === "NO") out.no += amt;
+    if (account && who.toLowerCase() === account.toLowerCase()) out.mine[side] += amt;
+  }
+  return out;
+}
+
+async function loadMarkets() {
+  el("markets").innerHTML = '<div class="card muted">Loading markets…</div>';
+  try {
+    const count = Number(await client.readContract({ address: CFG.contract, functionName: "getCount", args: [] }));
+    if (!count) { el("markets").innerHTML = '<div class="card muted">No markets yet. Open the first one above.</div>'; return; }
+    let html = "";
+    for (let i = count; i >= 1; i--) {
+      const id = "milestone-" + i;
+      const m = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+      const pos = parsePositions(await client.readContract({ address: CFG.contract, functionName: "getPositions", args: [id] }));
+      const cls = m.status === "OPEN" ? "dim" : m.status === "RESOLVED" ? "warn" : m.status === "VOID" ? "void" : "ok";
+      const ocls = m.outcome === "YES" ? "ok" : m.outcome === "NO" ? "no" : "dim";
+      const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
+      const past = m.deadline > 0 && Date.now() / 1000 > m.deadline;
+
+      html += '<div class="m" data-id="' + esc(id) + '" data-pools=\'' + JSON.stringify(pos) + "'>";
+      html += "<h3>" + esc(m.milestone || "(no criteria)") + "</h3>";
+      html += '<div class="meta">' + esc(m.repo) + " · id " + esc(id) + " · deadline " + esc(when) + "</div>";
+      html += '<div class="row" style="margin-top:8px;">Status <span class="badge ' + cls + '">' + esc(m.status || "-") + "</span>";
+      html += 'Outcome <span class="badge ' + ocls + '">' + esc(m.outcome || "—") + "</span>";
+      html += '<span class="muted" style="font-size:.82rem;">pool ' + fmtGen(m.pool) + " GEN · YES " + fmtGen(pos.yes) + " · NO " + fmtGen(pos.no) + "</span></div>";
+      if (m.reasoning) html += '<div class="reason">' + esc(m.reasoning) + "</div>";
+
+      if (m.status === "OPEN") {
+        html += '<div class="stake">';
+        if (past) {
+          html += '<div class="row"><button class="small" data-act="resolve" data-id="' + esc(id) + '">Resolve now</button>';
+          html += '<span class="muted" style="font-size:.82rem;">Deadline passed — validators can judge the repo.</span></div>';
+          if (m.deadline > 0 && Date.now() / 1000 > m.deadline + VOID_GRACE) {
+            html += '<div class="row" style="margin-top:8px;"><button class="small ghost" data-act="void" data-id="' + esc(id) + '">Void &amp; refund</button>';
+            html += '<span class="muted" style="font-size:.82rem;">Unresolved ' + VOID_GRACE_DAYS + ' days past the deadline — everyone takes their stake back.</span></div>';
+          }
+        } else {
+          html += "<label>Stake amount (GEN)</label><div class=\"row\">";
+          html += '<input class="amt" data-id="' + esc(id) + '" type="number" min="0" step="0.001" value="1" />';
+          html += '<button class="small" data-act="stake-yes" data-id="' + esc(id) + '">Stake YES</button>';
+          html += '<button class="small ghost" data-act="stake-no" data-id="' + esc(id) + '">Stake NO</button>';
+          html += "</div>";
+          html += '<div class="odds" data-odds="' + esc(id) + '"></div>';
+        }
+        html += "</div>";
+      } else if (m.status === "RESOLVED") {
+        html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="settle" data-id="' + esc(id) + '">Settle</button></div>';
+      } else {
+        const isVoid = m.status === "VOID";
+        // A claim that has been made is NOT a payout that has arrived: the GEN
+        // rides an external transfer that only executes on finalization.
+        let claimed = "0";
+        if (account) {
+          try { claimed = String(await client.readContract({ address: CFG.contract, functionName: "isClaimed", args: [id, account] })); } catch (e) {}
+        }
+        if (claimed === "1") {
+          html += '<div class="row" style="margin-top:10px;"><span class="badge warn">CLAIMED</span>';
+          html += '<span class="muted" style="font-size:.82rem;">payout settles when the transaction finalizes (tens of minutes; measured 20 min – 2.4 h) — watch the explorer, not this page.</span></div>';
+        } else {
+          html += '<div class="row" style="margin-top:10px;"><button class="small" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
+          if (account) {
+            const p = await client.readContract({ address: CFG.contract, functionName: "previewPayout", args: [id, account] });
+            html += '<span class="muted" style="font-size:.82rem;">' + (isVoid ? "refund" : "your payout") + ": " + fmtGen(p) + " GEN</span>";
+          }
+          html += "</div>";
+        }
+      }
+      html += "</div>";
+    }
+    el("markets").innerHTML = html;
+    document.querySelectorAll("input.amt").forEach((inp) => paintOdds(inp.dataset.id));
+  } catch (e) {
+    el("markets").innerHTML = '<div class="card">Read failed: ' + esc(e && e.message ? e.message : e) + "</div>";
+  }
+}
+
+// ------------------------------------------------------------- odds preview
+// Parimutuel: winners split the whole pool in proportion to their winning stake.
+function payoutIfWin(stake, sidePool, otherPool, mySideStake) {
+  const winningPool = sidePool + stake;
+  const total = sidePool + otherPool + stake;
+  if (winningPool <= 0) return 0;
+  return ((mySideStake + stake) * total) / winningPool;
+}
+
+function paintOdds(id) {
+  const box = document.querySelector('[data-odds="' + id + '"]');
+  const inp = document.querySelector('input.amt[data-id="' + id + '"]');
+  if (!box || !inp) return;
+  const node = inp.closest(".m");
+  if (!node) return;
+  let pools = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
+  try { pools = JSON.parse(node.dataset.pools || "{}"); } catch (e) {}
+  if (!pools.mine) pools.mine = { YES: 0, NO: 0 };
+
+  const gen = Number(inp.value || 0);
+  if (!isFinite(gen) || gen <= 0) { box.innerHTML = '<span class="muted">Enter an amount to see the payout.</span>'; return; }
+  const stake = gen * 1e18;
+
+  const yPayout = payoutIfWin(stake, pools.yes || 0, pools.no || 0, pools.mine.YES || 0);
+  const nPayout = payoutIfWin(stake, pools.no || 0, pools.yes || 0, pools.mine.NO || 0);
+  const yProfit = yPayout - ((pools.mine.YES || 0) + stake);
+  const nProfit = nPayout - ((pools.mine.NO || 0) + stake);
+  const roi = (v) => (stake > 0 ? Math.round((v / stake) * 100) : 0);
+
+  box.innerHTML =
+    "Stake " + fmtGen(stake) + " GEN → " +
+    "if <b>YES</b> wins: <b>+" + fmtGen(Math.max(0, yProfit)) + " GEN</b> (" + roi(Math.max(0, yProfit)) + "% ROI) · " +
+    "if NO wins: <i>-" + fmtGen(stake) + " GEN</i><br>" +
+    "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;" +
+    "if <b>NO</b> wins: <b>+" + fmtGen(Math.max(0, nProfit)) + " GEN</b> (" + roi(Math.max(0, nProfit)) + "% ROI) · " +
+    "if YES wins: <i>-" + fmtGen(stake) + " GEN</i>";
+}
+
+// ------------------------------------------------------------------ writes
+async function write(fn, args, value = 0n) {
+  if (!account) { log("Connect a wallet first."); return null; }
+  try {
+    log("Sending " + fn + "…");
+    const hash = await client.writeContract({ address: CFG.contract, functionName: fn, args, value, gasLimit: GAS });
+    log(fn + " sent", hash);
+    const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
+    log(fn + " status " + (rc && rc.status), hash);
+    return rc;
+  } catch (e) {
+    log(fn + " failed: " + (e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : e));
+    return null;
+  }
+}
+
+// Drive consensus with a real retry budget, then poll for a late commit.
+async function resolveWithRetry(id) {
+  if (!account) { log("Connect a wallet first."); return; }
+  for (let round = 1; round <= RESOLVE_ROUNDS; round++) {
+    log("AI validators reaching consensus — round " + round + " of " + RESOLVE_ROUNDS + "…", null, "prog");
+    const rc = await write("resolve", [id]);
+    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+    if (row.outcome === "YES" || row.outcome === "NO") {
+      log("Resolved " + id + ": " + row.outcome, null, "prog");
+      await loadMarkets();
+      return;
+    }
+    if (rc && rc.status !== 5) await sleep(5000);
+  }
+  log("Consensus is unusually slow — the market is saved on-chain and still OPEN. Polling for a late commit…", null, "prog");
+  for (let i = 0; i < POLL_AFTER; i++) {
+    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+    if (row.outcome === "YES" || row.outcome === "NO") {
+      log("Late commit landed: " + id + " = " + row.outcome, null, "prog");
+      await loadMarkets();
+      return;
+    }
+    await sleep(POLL_EVERY_MS);
+  }
+  log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN, and once it is " + VOID_GRACE_DAYS + " days past the deadline anyone can void it for a full refund.");
+  await loadMarkets();
+}
+
+// A claim is an EXTERNAL message: the GEN does not move when the transaction is
+// accepted, only when it FINALIZES (measured 20 min to 2.4 h on Bradbury). So a
+// submitted claim is never reported as a failure -- the UI watches the wallet
+// balance until the payout actually lands.
+async function claimAndTrack(id) {
+  if (!account) { log("Connect a wallet first."); return; }
+  let before = 0n;
+  try { before = BigInt(await client.getBalance({ address: account })); } catch (e) {}
+  const rc = await write("claim", [id]);
+  if (!rc) return;
+  log("Claim accepted. The payout is an external transfer and executes when the transaction FINALIZES — tens of minutes (measured 20 min to 2.4 h). Watching your balance…", null, "prog");
+  await loadMarkets();
+  for (let i = 1; i <= PAYOUT_POLLS; i++) {
+    await sleep(PAYOUT_POLL_MS);
+    let now = before;
+    try { now = BigInt(await client.getBalance({ address: account })); } catch (e) {}
+    if (now > before) {
+      log("Payout landed: +" + fmtGen(now - before) + " GEN", null, "prog");
+      await loadMarkets();
+      return;
+    }
+    if (i % 4 === 0) log("Still waiting for finalization (" + Math.round((i * PAYOUT_POLL_MS) / 60000) + " min)…", null, "prog");
+  }
+  log("Not finalized after ~1 h. Nothing is lost — the transfer is queued and executes on finalization; check the explorer for the claim transaction.", null, "prog");
+  await loadMarkets();
+}
+
+// ------------------------------------------------------------------ events
+el("btnConnect").addEventListener("click", connect);
+el("btnRefresh").addEventListener("click", loadMarkets);
+
+el("btnCreate").addEventListener("click", async () => {
+  const repo = el("repo").value.trim();
+  const milestone = el("milestone").value.trim();
+  const dt = el("deadline").value;
+  if (!repo || !milestone || !dt) { log("Repository, criteria and deadline are all required."); return; }
+  const deadline = BigInt(Math.floor(new Date(dt).getTime() / 1000));
+  await write("createMarket", [repo, milestone, deadline]);
+  await loadMarkets();
+});
+
+el("markets").addEventListener("input", (ev) => {
+  if (ev.target.classList && ev.target.classList.contains("amt")) paintOdds(ev.target.dataset.id);
+});
+
+el("markets").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const act = btn.dataset.act;
+
+  if (act === "stake-yes" || act === "stake-no") {
+    const inp = document.querySelector('input.amt[data-id="' + id + '"]');
+    const gen = Number(inp && inp.value);
+    if (!gen || gen <= 0) { log("Enter a stake amount above zero."); return; }
+    const side = act === "stake-yes" ? "YES" : "NO";
+    btn.disabled = true;
+    await write("stake", [id, side], BigInt(Math.round(gen * 1e18)));
+    await loadMarkets();
+    return;
+  }
+  if (act === "resolve") return resolveWithRetry(id);
+  if (act === "settle") { await write("settle", [id]); return loadMarkets(); }
+  if (act === "claim") { await claimAndTrack(id); return; }
+  if (act === "void") { await write("void", [id]); return loadMarkets(); }
+});
+
+loadMarkets();
+</script>
+</body>
+</html>

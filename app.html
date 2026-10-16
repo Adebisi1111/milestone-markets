@@ -1,0 +1,682 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="theme-color" content="#08090D" />
+<title>MilestoneMarkets — App</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%236D5EF8'/%3E%3Cpath d='M9 22V13h7v-3h7' stroke='%23fff' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#08090D; --surface:#0F1117; --surface-2:#141720; --surface-3:#1A1E29;
+    --line:#212533; --line-2:#2C3243;
+    --ink:#EEF0F5; --ink-2:#AEB6C6; --mut:#727B8C;
+    --brand:#6D5EF8; --brand-2:#8C7DFF; --brand-dim:#6D5EF81F;
+    --yes:#2FD98A; --no:#FF6B81; --warn:#F5C451;
+    --r1:8px; --r2:12px; --r3:18px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink); min-height:100vh;
+    font:400 15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased;
+    background-image:
+      radial-gradient(900px 380px at 12% -8%, #6D5EF81A, transparent 60%),
+      radial-gradient(700px 320px at 88% -4%, #2FD98A12, transparent 62%);
+    background-repeat:no-repeat;
+  }
+  .mono{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace}
+  .micro{font-size:.7rem;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);font-weight:600}
+
+  /* ---------------------------------------------------------------- topbar */
+  .top{
+    position:sticky; top:0; z-index:20;
+    backdrop-filter:blur(14px); background:#08090DCC; border-bottom:1px solid var(--line);
+  }
+  .top .inner{max-width:1080px;margin:0 auto;padding:12px 20px;display:flex;align-items:center;gap:14px}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:inherit}
+  .brand .wm{font-weight:680;letter-spacing:-.015em;font-size:1.02rem}
+  .brand .wm span{color:var(--brand-2)}
+  .spacer{flex:1}
+  .pill{
+    display:inline-flex;align-items:center;gap:7px;padding:6px 11px;border-radius:999px;
+    background:var(--surface-2);border:1px solid var(--line);font-size:.78rem;color:var(--ink-2);
+  }
+  .dot{width:6px;height:6px;border-radius:50%;background:var(--yes);box-shadow:0 0 0 3px #2FD98A22}
+
+  /* --------------------------------------------------------------- buttons */
+  button{font:inherit;cursor:pointer;border:1px solid transparent;border-radius:10px;transition:.14s ease}
+  .btn-primary{background:var(--brand);color:#fff;padding:9px 16px;font-weight:620;font-size:.88rem}
+  .btn-primary:hover{background:var(--brand-2)}
+  .btn-ghost{background:var(--surface-2);color:var(--ink);border-color:var(--line-2);padding:9px 14px;font-weight:560;font-size:.86rem}
+  .btn-ghost:hover{background:var(--surface-3)}
+  .btn-yes{background:#2FD98A1A;color:var(--yes);border-color:#2FD98A45;padding:8px 14px;font-weight:640;font-size:.85rem}
+  .btn-yes:hover{background:#2FD98A2A}
+  .btn-no{background:#FF6B811A;color:var(--no);border-color:#FF6B8145;padding:8px 14px;font-weight:640;font-size:.85rem}
+  .btn-no:hover{background:#FF6B812A}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ----------------------------------------------------------------- shell */
+  .wrap{max-width:1080px;margin:0 auto;padding:32px 20px 64px}
+  .head{max-width:68ch;margin-bottom:24px}
+  h1{margin:0 0 6px;font-size:clamp(1.7rem,3.4vw,2.1rem);font-weight:700;letter-spacing:-.028em;line-height:1.15}
+  .lede{margin:0;color:var(--ink-2);font-size:.95rem}
+  .stats{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:18px}
+  @media(min-width:640px){.stats{grid-template-columns:repeat(4,1fr)}}
+  .stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r2);padding:13px 16px}
+  .stat b{display:block;font-size:1.28rem;font-weight:690;letter-spacing:-.026em;margin-top:3px}
+  .stat .sub{color:var(--mut);font-size:.76rem;margin-top:2px}
+
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:20px}
+  .card + .card{margin-top:16px}
+  .card h2{margin:0 0 3px;font-size:1rem;font-weight:660;letter-spacing:-.012em}
+  .card .hint{margin:0 0 18px;color:var(--mut);font-size:.84rem}
+
+  /* ------------------------------------------------------------- contract */
+  .contract{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:space-between}
+  .addrrow{display:flex;align-items:center;gap:9px;margin-top:5px}
+  .addr{font-size:.82rem;color:var(--ink-2);word-break:break-all}
+  .copy{background:var(--surface-2);border:1px solid var(--line-2);color:var(--ink-2);border-radius:8px;padding:5px 11px;font-size:.76rem;font-weight:560}
+  .copy:hover{color:var(--ink);background:var(--surface-3)}
+  .who{margin-top:9px;font-size:.82rem;color:var(--ink-2);display:flex;align-items:center;gap:8px}
+  .who .dot{background:var(--mut);box-shadow:none}
+  .who.on .dot{background:var(--yes);box-shadow:0 0 0 3px #2FD98A22}
+
+  /* ------------------------------------------------------------------ form */
+  .grid{display:grid;gap:14px;grid-template-columns:1fr}
+  @media(min-width:720px){.grid.two{grid-template-columns:1.1fr .9fr}}
+  label{display:block;font-size:.78rem;color:var(--ink-2);font-weight:560;margin-bottom:6px}
+  input,select,textarea{
+    width:100%;background:var(--bg);border:1px solid var(--line-2);color:var(--ink);
+    border-radius:10px;padding:10px 12px;font:inherit;font-size:.9rem;outline:none;transition:.14s;
+    color-scheme:dark;
+  }
+  input[type="datetime-local"]{cursor:pointer}
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator{filter:invert(.7);cursor:pointer}
+  input::placeholder,textarea::placeholder{color:#5B6373}
+  input:focus,select:focus,textarea:focus{border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-dim)}
+  textarea{resize:vertical;min-height:64px;line-height:1.5}
+  .formfoot{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:18px}
+  .formfoot .hint{margin:0;color:var(--mut);font-size:.8rem}
+
+  /* --------------------------------------------------------------- markets */
+  .sec{display:flex;align-items:baseline;justify-content:space-between;margin:34px 0 14px}
+  .sec h2{margin:0;font-size:.78rem;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);font-weight:650}
+  .mk{background:var(--surface);border:1px solid var(--line);border-radius:var(--r3);padding:20px;transition:.16s}
+  .mk:hover{border-color:var(--line-2)}
+  .mk + .mk{margin-top:14px}
+  .mk-top{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:12px}
+  .tag{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:.72rem;font-weight:680;letter-spacing:.03em}
+  .t-open{background:var(--surface-3);color:var(--ink-2)}
+  .t-resolved{background:#F5C4511A;color:var(--warn);border:1px solid #F5C45133}
+  .t-settled{background:#2FD98A1A;color:var(--yes);border:1px solid #2FD98A33}
+  .t-void{background:#8C7DFF1A;color:var(--brand-2);border:1px solid #8C7DFF33}
+  .t-yes{background:#2FD98A1A;color:var(--yes)}
+  .t-no{background:#FF6B811A;color:var(--no)}
+  .t-dim{background:var(--surface-3);color:var(--mut)}
+  .mk h3{margin:0 0 10px;font-size:1.06rem;font-weight:620;letter-spacing:-.014em;line-height:1.4}
+  .mk-meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:.8rem;color:var(--mut);margin-bottom:14px}
+  .mk-meta a{color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--line-2)}
+  .mk-meta a:hover{color:var(--brand-2)}
+  .sep{opacity:.4}
+
+  .pool{margin:14px 0 4px}
+  .poolbar{height:7px;border-radius:999px;overflow:hidden;background:#FF6B8133;display:flex}
+  .poolbar i{display:block;background:var(--yes)}
+  .poolrow{display:flex;justify-content:space-between;margin-top:7px;font-size:.78rem;color:var(--ink-2)}
+  .poolrow .y{color:var(--yes);font-weight:620}
+  .poolrow .n{color:var(--no);font-weight:620}
+
+  .quote{background:var(--bg);border:1px solid var(--line);border-left:2px solid var(--brand);border-radius:10px;padding:12px 14px;margin-top:14px}
+  .quote .micro{display:block;margin-bottom:5px;color:var(--brand-2)}
+  .quote p{margin:0;font-size:.88rem;color:var(--ink-2);line-height:1.55}
+
+  .act{margin-top:16px;padding-top:16px;border-top:1px solid var(--line);display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+  .amtwrap{display:flex;align-items:center;background:var(--bg);border:1px solid var(--line-2);border-radius:10px;padding:0 12px;height:38px}
+  .amtwrap input{width:88px;background:none;border:0;padding:0;font-size:.9rem;height:auto}
+  .amtwrap input:focus{box-shadow:none}
+  .amtwrap span{font-size:.78rem;color:var(--mut);font-weight:600}
+  .note{font-size:.8rem;color:var(--mut);padding-bottom:9px}
+  .odds{margin-top:12px;font-size:.83rem;color:var(--ink-2);line-height:1.7;background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .odds b{color:var(--yes);font-weight:640}
+  .odds i{color:var(--no);font-style:normal;font-weight:600}
+  .odds .lg{color:var(--mut);font-size:.76rem;display:block;margin-bottom:3px}
+
+  .empty{background:var(--surface);border:1px dashed var(--line-2);border-radius:var(--r3);padding:40px 20px;text-align:center;color:var(--mut);font-size:.9rem}
+
+  /* ------------------------------------------------------------------- log */
+  .feed{margin-top:8px;max-height:230px;overflow:auto}
+  .feed .ev{display:flex;gap:11px;padding:8px 0;border-bottom:1px solid var(--line);font-size:.83rem;align-items:baseline}
+  .feed .ev:last-child{border-bottom:0}
+  .feed .ts{color:var(--mut);font-size:.74rem;flex:0 0 58px}
+  .feed .msg{color:var(--ink-2);word-break:break-word;flex:1}
+  .feed .ev.prog .msg{color:var(--warn)}
+  .feed a{color:var(--brand-2);text-decoration:none}
+  .feed a:hover{text-decoration:underline}
+
+  .foot{margin-top:34px;padding-top:20px;border-top:1px solid var(--line);display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;font-size:.8rem;color:var(--mut)}
+  .foot a{color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--line-2)}
+  .foot a:hover{color:var(--brand-2)}
+  @media(max-width:600px){.wrap{padding:22px 15px 48px}.card{padding:16px}.mk{padding:16px}}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="inner">
+    <a class="brand" href="./">
+      <svg viewBox="0 0 32 32" width="26" height="26" aria-hidden="true">
+        <defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#6D5EF8"/><stop offset="1" stop-color="#2FD98A"/>
+        </linearGradient></defs>
+        <rect width="32" height="32" rx="9" fill="url(#lg)"/>
+        <path d="M9.5 22.5V13h6.5v-3h6.5" stroke="#fff" stroke-width="2.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="9.5" cy="22.5" r="2.3" fill="#fff"/>
+        <circle cx="22.5" cy="10" r="2.3" fill="#fff"/>
+      </svg>
+      <span class="wm">Milestone<span>Markets</span></span>
+    </a>
+    <div class="spacer"></div>
+    <span class="pill"><span class="dot"></span><span id="net"></span></span>
+    <button id="btnConnect" class="btn-primary">Connect wallet</button>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="head">
+    <h1>Prediction markets on open-source delivery</h1>
+    <p class="lede">
+      Stake GEN on whether a repository ships a milestone by its deadline. GenLayer's AI
+      validators read the repo's own commits, pull requests and file tree to decide — nobody
+      picks the evidence, not even the market creator.
+    </p>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><span class="micro">Markets</span><b id="statCount">—</b><div class="sub">open, resolved and settled</div></div>
+    <div class="stat"><span class="micro">Staked</span><b id="statPool">—</b><div class="sub">total across all markets</div></div>
+    <div class="stat"><span class="micro">Evidence</span><b>the repo</b><div class="sub">no creator-chosen URL</div></div>
+    <div class="stat"><span class="micro">Settlement</span><b>AI consensus</b><div class="sub">multi-validator, comparative</div></div>
+  </div>
+
+  <div class="card">
+    <div class="contract">
+      <div>
+        <span class="micro">Contract</span>
+        <div class="addrrow">
+          <span id="addr" class="addr mono"></span>
+          <button id="btnCopy" class="copy">copy</button>
+        </div>
+        <div id="who" class="who"><span class="dot"></span><span>Not connected — browsing only.</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Open a market</h2>
+    <p class="hint">Anyone can open one. There is no evidence URL to supply — the contract builds the GitHub queries from the repository name, so no creator can choose what the validators read.</p>
+    <div class="grid two">
+      <div>
+        <label for="repo">Repository</label>
+        <input id="repo" placeholder="genlayerlabs/genlayer-js" autocomplete="off" spellcheck="false" />
+      </div>
+      <div>
+        <label for="deadline">Deadline (local time)</label>
+        <input id="deadline" type="datetime-local" />
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <label for="milestone">Success criteria</label>
+      <textarea id="milestone" rows="2" placeholder="Ship TypeScript typings for readContract, with tests, merged into main"></textarea>
+    </div>
+    <div class="formfoot">
+      <button id="btnCreate" class="btn-primary">Create market</button>
+      <p class="hint">The deadline is the “on time” half — a merge dated after it counts as NO.</p>
+    </div>
+  </div>
+
+  <div class="sec"><h2>Markets</h2><button id="btnRefresh" class="btn-ghost" style="padding:7px 13px;font-size:.82rem">Refresh</button></div>
+  <div id="markets"></div>
+
+  <div class="card" style="margin-top:22px">
+    <h2>Activity</h2>
+    <div id="log" class="feed"><div class="ev"><span class="ts">—</span><span class="msg">Idle.</span></div></div>
+  </div>
+
+  <div class="foot">
+    <span>Reads via genlayer-js · writes signed in your wallet</span>
+    <a id="explorer" href="#" target="_blank" rel="noopener"></a>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from "https://esm.sh/genlayer-js@1.1.8";
+import { testnetBradbury } from "https://esm.sh/genlayer-js@1.1.8/chains";
+
+// ---------------------------------------------------------------------------
+// Everything chain-specific lives in this one block. To launch on mainnet, set
+// NETWORK = "mainnet" and fill in the mainnet entry -- nothing else in this file
+// refers to a network, an RPC, an explorer or a contract address directly.
+//
+// The SDK ships no mainnet chain definition (it exports only localnet, studionet,
+// testnetAsimov, testnetBradbury), so a non-Bradbury network is built by
+// extending the Bradbury definition -- .extend() keeps the consensus contract and
+// its ABI, which a hand-written { id, rpcUrls } literal would lose.
+// ---------------------------------------------------------------------------
+const NETWORKS = {
+  bradbury: {
+    label: "Bradbury",
+    chainId: 4221,
+    rpcUrl: "https://rpc-bradbury.genlayer.com",
+    explorer: "https://explorer-bradbury.genlayer.com",
+    contract: "0x203F67178a7B25803854D179d72Bf40Cfcdc2c88",
+    nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  },
+  // mainnet: {
+  //   label: "GenLayer",
+  //   chainId: 0,                 // <- mainnet chain id
+  //   rpcUrl: "https://...",      // <- mainnet RPC
+  //   explorer: "https://...",    // <- mainnet explorer
+  //   contract: "0x...",          // <- the contract deployed on mainnet
+  //   nativeCurrency: { name: "GEN", symbol: "GEN", decimals: 18 },
+  // },
+};
+const NETWORK = "bradbury";
+const CFG = NETWORKS[NETWORK];
+const EXPLORER = CFG.explorer + "/transaction/";
+
+function chainFor(cfg) {
+  if (cfg.chainId === testnetBradbury.id) return testnetBradbury;
+  return testnetBradbury.extend({
+    id: cfg.chainId,
+    name: cfg.label,
+    rpcUrls: { default: { http: [cfg.rpcUrl] } },
+  });
+}
+
+// Payouts are EXTERNAL messages: they execute on FINALIZATION, not on acceptance.
+// Measured on Bradbury, finalization ran ~20 min to ~2.4 h, so the UI must never
+// present a submitted claim as failed -- it polls until the balance moves.
+const PAYOUT_POLLS = 40;
+const PAYOUT_POLL_MS = 90000;
+
+// GenLayer has no gas estimation on its RPC, so every write carries an explicit
+// limit. Too low reverts with "intrinsic gas too low".
+const GAS = 5000000n;
+
+// Consensus is non-deterministic: any round can come back LEADER_TIMEOUT or
+// VALIDATORS_TIMEOUT before one reaches AGREE. Too small a budget orphans the
+// market, so we drive it properly and then keep polling for a late commit.
+const RESOLVE_ROUNDS = 12;
+const POLL_AFTER = 45;
+const POLL_EVERY_MS = 4000;
+// A market the validators never resolve can be voided once the deadline is
+// this far past, so staker GEN is never held forever.
+const VOID_GRACE_DAYS = 30;
+const VOID_GRACE = VOID_GRACE_DAYS * 24 * 3600;
+
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function fmtGen(wei) {
+  const n = Number(wei) / 1e18;
+  if (!isFinite(n) || n === 0) return "0";
+  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+const clock = () => new Date().toISOString().slice(11, 19);
+
+function log(msg, hash, cls) {
+  const row = document.createElement("div");
+  row.className = "ev" + (cls ? " " + cls : "");
+  row.innerHTML =
+    '<span class="ts mono">' + clock() + "</span>" +
+    '<span class="msg">' + esc(msg) +
+    (hash ? ' — <a href="' + EXPLORER + esc(hash) + '" target="_blank" rel="noopener">' + esc(hash.slice(0, 18)) + "…</a>" : "") +
+    "</span>";
+  const box = el("log");
+  const only = box.firstChild;
+  if (only && only.textContent.includes("Idle.")) box.innerHTML = "";
+  box.prepend(row);
+}
+
+let client = createClient({ chain: chainFor(CFG) });
+let account = null;
+
+el("addr").textContent = CFG.contract;
+el("net").textContent = CFG.label + " · " + CFG.chainId;
+el("explorer").href = CFG.explorer;
+el("explorer").textContent = CFG.explorer.replace(/^https?:\/\//, "");
+el("btnCopy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText(CFG.contract); el("btnCopy").textContent = "copied"; }
+  catch (e) { el("btnCopy").textContent = "select above"; }
+  setTimeout(() => (el("btnCopy").textContent = "copy"), 1400);
+});
+
+// ------------------------------------------------------------------ wallet
+// Writes must go through the wallet ON the right chain. Without this the wallet
+// signs against whatever network it happens to be on and the tx goes nowhere.
+async function ensureChain() {
+  const want = "0x" + CFG.chainId.toString(16);
+  const cur = await window.ethereum.request({ method: "eth_chainId" });
+  if (String(cur).toLowerCase() === want.toLowerCase()) return;
+  try {
+    await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: want }] });
+  } catch (e) {
+    if (e && (e.code === 4902 || e.code === -32603)) {
+      await window.ethereum.request({
+        method: "wallet_addEthereumChain",
+        params: [{
+          chainId: want,
+          chainName: CFG.label,
+          rpcUrls: [CFG.rpcUrl],
+          nativeCurrency: CFG.nativeCurrency,
+          blockExplorerUrls: [CFG.explorer],
+        }],
+      });
+    } else {
+      throw e;
+    }
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) { log("No injected wallet found. Install a browser wallet to stake."); return; }
+  let accts = await window.ethereum.request({ method: "eth_accounts" });
+  if (!accts || accts.length === 0) accts = await window.ethereum.request({ method: "eth_requestAccounts" });
+  account = accts[0];
+  try {
+    await ensureChain();
+  } catch (e) {
+    log("Could not switch the wallet to " + CFG.label + ": " + (e && e.message ? e.message : e));
+    return;
+  }
+  // account MUST be an address string + provider, or writes sign with a local key
+  client = createClient({ chain: chainFor(CFG), account, provider: window.ethereum });
+  el("who").className = "who on";
+  el("who").innerHTML = '<span class="dot"></span><span class="mono">' + esc(account.slice(0, 10) + "…" + account.slice(-6)) + " · " + esc(CFG.label) + "</span>";
+  el("btnConnect").textContent = "Connected";
+  el("btnConnect").disabled = true;
+  log("Wallet connected on " + CFG.label + ".");
+  loadMarkets();
+}
+
+// ------------------------------------------------------------------- reads
+// getMarket returns JSON, not a delimited string: the criteria is stored
+// verbatim, so a separator character inside it must not shift the other fields.
+function parseMarket(row) {
+  let o = {};
+  try { o = typeof row === "string" ? JSON.parse(row) : (row || {}); } catch (e) { o = {}; }
+  if (!o.exists) return { exists: false };
+  return {
+    repo: o.repo || "", milestone: o.milestone || "", status: o.status || "",
+    outcome: o.outcome || "", deadline: Number(o.deadline || 0),
+    pool: o.pool != null ? String(o.pool) : "0",
+    reasoning: o.reasoning || "",
+    yesPool: Number(o.yes_pool || 0), noPool: Number(o.no_pool || 0),
+  };
+}
+
+function parsePositions(pos) {
+  const out = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
+  for (const p of String(pos || "").split("|")) {
+    if (!p) continue;
+    const bits = p.split(":");
+    if (bits.length < 3) continue;
+    const who = bits[0], side = bits[1], amt = Number(bits[2]) || 0;
+    if (side === "YES") out.yes += amt;
+    else if (side === "NO") out.no += amt;
+    if (account && who.toLowerCase() === account.toLowerCase()) out.mine[side] += amt;
+  }
+  return out;
+}
+
+const tagClass = (s) =>
+  s === "OPEN" ? "t-open" : s === "RESOLVED" ? "t-resolved" : s === "VOID" ? "t-void" : "t-settled";
+
+async function loadMarkets() {
+  el("markets").innerHTML = '<div class="empty">Loading markets…</div>';
+  try {
+    const count = Number(await client.readContract({ address: CFG.contract, functionName: "getCount", args: [] }));
+    el("statCount").textContent = count || "0";
+    if (!count) {
+      el("statPool").textContent = "0 GEN";
+      el("markets").innerHTML = '<div class="empty">No markets yet — open the first one above.</div>';
+      return;
+    }
+    let html = "";
+    let total = 0;
+    for (let i = count; i >= 1; i--) {
+      const id = "milestone-" + i;
+      const m = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+      const pos = parsePositions(await client.readContract({ address: CFG.contract, functionName: "getPositions", args: [id] }));
+      total += Number(m.pool) || 0;
+      const when = m.deadline ? new Date(m.deadline * 1000).toISOString().replace("T", " ").slice(0, 16) + " UTC" : "-";
+      const past = m.deadline > 0 && Date.now() / 1000 > m.deadline;
+      const yes = pos.yes, no = pos.no, sum = yes + no;
+      const yesPct = sum > 0 ? Math.round((yes / sum) * 100) : 50;
+
+      html += '<div class="mk" data-id="' + esc(id) + '" data-pools=\'' + JSON.stringify(pos) + "'>";
+      html += '<div class="mk-top">';
+      html += '<span class="tag ' + tagClass(m.status) + '">' + esc(m.status || "—") + "</span>";
+      if (m.outcome) html += '<span class="tag ' + (m.outcome === "YES" ? "t-yes" : "t-no") + '">' + esc(m.outcome) + "</span>";
+      html += '<span class="tag t-dim mono">' + esc(id) + "</span>";
+      html += "</div>";
+
+      html += "<h3>" + esc(m.milestone || "(no criteria)") + "</h3>";
+      html += '<div class="mk-meta">';
+      html += '<span class="mono">' + esc(m.repo) + "</span><span class=\"sep\">·</span>";
+      html += "<span>deadline " + esc(when) + "</span>";
+      if (past && m.status === "OPEN") html += '<span class="sep">·</span><span style="color:var(--warn)">deadline passed</span>';
+      html += "</div>";
+
+      html += '<div class="pool"><div class="poolbar"><i style="width:' + yesPct + '%"></i></div>';
+      html += '<div class="poolrow"><span class="y">YES ' + fmtGen(yes) + "</span>";
+      html += "<span>" + fmtGen(m.pool) + " GEN staked</span>";
+      html += '<span class="n">' + fmtGen(no) + " NO</span></div></div>";
+
+      if (m.reasoning) {
+        html += '<div class="quote"><span class="micro">AI consensus — why</span><p>' + esc(m.reasoning) + "</p></div>";
+      }
+
+      if (m.status === "OPEN") {
+        html += '<div class="act">';
+        if (past) {
+          html += '<button class="btn-primary" data-act="resolve" data-id="' + esc(id) + '">Resolve now</button>';
+          html += '<span class="note">Deadline passed — the validators can judge the repository.</span>';
+          if (m.deadline > 0 && Date.now() / 1000 > m.deadline + VOID_GRACE) {
+            html += '<button class="btn-ghost" data-act="void" data-id="' + esc(id) + '">Void &amp; refund</button>';
+            html += '<span class="note">Unresolved ' + VOID_GRACE_DAYS + ' days past the deadline — everyone takes their stake back.</span>';
+          }
+        } else {
+          html += '<div class="amtwrap"><input class="amt" data-id="' + esc(id) + '" type="number" min="0" step="0.001" value="1" /><span>GEN</span></div>';
+          html += '<button class="btn-yes" data-act="stake-yes" data-id="' + esc(id) + '">Stake YES</button>';
+          html += '<button class="btn-no" data-act="stake-no" data-id="' + esc(id) + '">Stake NO</button>';
+        }
+        html += "</div>";
+        if (!past) html += '<div class="odds" data-odds="' + esc(id) + '"></div>';
+      } else if (m.status === "RESOLVED") {
+        html += '<div class="act"><button class="btn-primary" data-act="settle" data-id="' + esc(id) + '">Settle &amp; open claims</button>';
+        html += '<span class="note">Locks the verdict. If the winning side drew no stake the market voids and everyone is refunded instead.</span></div>';
+      } else {
+        const isVoid = m.status === "VOID";
+        let claimed = "0";
+        if (account) {
+          try { claimed = String(await client.readContract({ address: CFG.contract, functionName: "isClaimed", args: [id, account] })); } catch (e) {}
+        }
+        if (claimed === "1") {
+          html += '<div class="act"><span class="tag t-resolved">CLAIMED</span>';
+          html += '<span class="note">The payout is an external transfer — it lands when the transaction finalizes (tens of minutes; measured 20 min – 2.4 h).</span></div>';
+        } else {
+          html += '<div class="act"><button class="btn-primary" data-act="claim" data-id="' + esc(id) + '">' + (isVoid ? "Refund stake" : "Claim payout") + "</button>";
+          if (account) {
+            const p = await client.readContract({ address: CFG.contract, functionName: "previewPayout", args: [id, account] });
+            html += '<span class="note">' + (isVoid ? "refund" : "your payout") + ": <b style=\"color:var(--yes)\">" + fmtGen(p) + " GEN</b></span>";
+          }
+          html += "</div>";
+        }
+      }
+      html += "</div>";
+    }
+    el("statPool").textContent = fmtGen(total) + " GEN";
+    el("markets").innerHTML = html;
+    document.querySelectorAll("input.amt").forEach((inp) => paintOdds(inp.dataset.id));
+  } catch (e) {
+    el("markets").innerHTML = '<div class="empty">Read failed: ' + esc(e && e.message ? e.message : e) + "</div>";
+  }
+}
+
+// ------------------------------------------------------------- odds preview
+// Parimutuel: winners split the whole pool in proportion to their winning stake.
+function payoutIfWin(stake, sidePool, otherPool, mySideStake) {
+  const winningPool = sidePool + stake;
+  const total = sidePool + otherPool + stake;
+  if (winningPool <= 0) return 0;
+  return ((mySideStake + stake) * total) / winningPool;
+}
+
+function paintOdds(id) {
+  const box = document.querySelector('[data-odds="' + id + '"]');
+  const inp = document.querySelector('input.amt[data-id="' + id + '"]');
+  if (!box || !inp) return;
+  const node = inp.closest(".mk");
+  if (!node) return;
+  let pools = { yes: 0, no: 0, mine: { YES: 0, NO: 0 } };
+  try { pools = JSON.parse(node.dataset.pools || "{}"); } catch (e) {}
+  if (!pools.mine) pools.mine = { YES: 0, NO: 0 };
+
+  const gen = Number(inp.value || 0);
+  if (!isFinite(gen) || gen <= 0) { box.innerHTML = '<span class="lg">Payout preview</span>Enter an amount to see what it returns.'; return; }
+  const stake = gen * 1e18;
+
+  const yPayout = payoutIfWin(stake, pools.yes || 0, pools.no || 0, pools.mine.YES || 0);
+  const nPayout = payoutIfWin(stake, pools.no || 0, pools.yes || 0, pools.mine.NO || 0);
+  const yProfit = yPayout - ((pools.mine.YES || 0) + stake);
+  const nProfit = nPayout - ((pools.mine.NO || 0) + stake);
+  const roi = (v) => (stake > 0 ? Math.round((v / stake) * 100) : 0);
+
+  box.innerHTML =
+    '<span class="lg">If you stake ' + fmtGen(stake) + ' GEN</span>' +
+    "<b>YES</b> wins → <b>+" + fmtGen(Math.max(0, yProfit)) + " GEN</b> (" + roi(Math.max(0, yProfit)) + "% ROI)" +
+    ' <span class="sep">·</span> ' +
+    "<b>NO</b> wins → <b>+" + fmtGen(Math.max(0, nProfit)) + " GEN</b> (" + roi(Math.max(0, nProfit)) + "% ROI)" +
+    '<span class="lg" style="margin:5px 0 0">Lose the other side and the stake is gone — winners split the whole pool.</span>';
+}
+
+// ------------------------------------------------------------------ writes
+async function write(fn, args, value = 0n) {
+  if (!account) { log("Connect a wallet first."); return null; }
+  try {
+    log("Sending " + fn + "…");
+    const hash = await client.writeContract({ address: CFG.contract, functionName: fn, args, value, gasLimit: GAS });
+    log(fn + " sent", hash);
+    const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
+    log(fn + " status " + (rc && rc.status), hash);
+    return rc;
+  } catch (e) {
+    log(fn + " failed: " + (e && e.shortMessage ? e.shortMessage : e && e.message ? e.message : e));
+    return null;
+  }
+}
+
+// Drive consensus with a real retry budget, then poll for a late commit.
+async function resolveWithRetry(id) {
+  if (!account) { log("Connect a wallet first."); return; }
+  for (let round = 1; round <= RESOLVE_ROUNDS; round++) {
+    log("AI validators reaching consensus — round " + round + " of " + RESOLVE_ROUNDS + "…", null, "prog");
+    const rc = await write("resolve", [id]);
+    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+    if (row.outcome === "YES" || row.outcome === "NO") {
+      log("Resolved " + id + ": " + row.outcome, null, "prog");
+      await loadMarkets();
+      return;
+    }
+    if (rc && rc.status !== 5) await sleep(5000);
+  }
+  log("Consensus is unusually slow — the market is saved on-chain and still OPEN. Polling for a late commit…", null, "prog");
+  for (let i = 0; i < POLL_AFTER; i++) {
+    const row = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
+    if (row.outcome === "YES" || row.outcome === "NO") {
+      log("Late commit landed: " + id + " = " + row.outcome, null, "prog");
+      await loadMarkets();
+      return;
+    }
+    await sleep(POLL_EVERY_MS);
+  }
+  log("Still unresolved. Nothing is lost — retry when you like; the market stays OPEN, and once it is " + VOID_GRACE_DAYS + " days past the deadline anyone can void it for a full refund.");
+  await loadMarkets();
+}
+
+// A claim is an EXTERNAL message: the GEN does not move when the transaction is
+// accepted, only when it FINALIZES (measured 20 min to 2.4 h on Bradbury). So a
+// submitted claim is never reported as a failure -- the UI watches the wallet
+// balance until the payout actually lands.
+async function claimAndTrack(id) {
+  if (!account) { log("Connect a wallet first."); return; }
+  let before = 0n;
+  try { before = BigInt(await client.getBalance({ address: account })); } catch (e) {}
+  const rc = await write("claim", [id]);
+  if (!rc) return;
+  log("Claim accepted. The payout is an external transfer and executes when the transaction FINALIZES — tens of minutes (measured 20 min to 2.4 h). Watching your balance…", null, "prog");
+  await loadMarkets();
+  for (let i = 1; i <= PAYOUT_POLLS; i++) {
+    await sleep(PAYOUT_POLL_MS);
+    let now = before;
+    try { now = BigInt(await client.getBalance({ address: account })); } catch (e) {}
+    if (now > before) {
+      log("Payout landed: +" + fmtGen(now - before) + " GEN", null, "prog");
+      await loadMarkets();
+      return;
+    }
+    if (i % 4 === 0) log("Still waiting for finalization (" + Math.round((i * PAYOUT_POLL_MS) / 60000) + " min)…", null, "prog");
+  }
+  log("Not finalized after ~1 h. Nothing is lost — the transfer is queued and executes on finalization; check the explorer for the claim transaction.", null, "prog");
+  await loadMarkets();
+}
+
+// ------------------------------------------------------------------ events
+el("btnConnect").addEventListener("click", connect);
+el("btnRefresh").addEventListener("click", loadMarkets);
+
+el("btnCreate").addEventListener("click", async () => {
+  const repo = el("repo").value.trim();
+  const milestone = el("milestone").value.trim();
+  const dt = el("deadline").value;
+  if (!repo || !milestone || !dt) { log("Repository, criteria and deadline are all required."); return; }
+  const deadline = BigInt(Math.floor(new Date(dt).getTime() / 1000));
+  await write("createMarket", [repo, milestone, deadline]);
+  await loadMarkets();
+});
+
+el("markets").addEventListener("input", (ev) => {
+  if (ev.target.classList && ev.target.classList.contains("amt")) paintOdds(ev.target.dataset.id);
+});
+
+el("markets").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const act = btn.dataset.act;
+
+  if (act === "stake-yes" || act === "stake-no") {
+    const inp = document.querySelector('input.amt[data-id="' + id + '"]');
+    const gen = Number(inp && inp.value);
+    if (!gen || gen <= 0) { log("Enter a stake amount above zero."); return; }
+    const side = act === "stake-yes" ? "YES" : "NO";
+    btn.disabled = true;
+    await write("stake", [id, side], BigInt(Math.round(gen * 1e18)));
+    await loadMarkets();
+    return;
+  }
+  if (act === "resolve") return resolveWithRetry(id);
+  if (act === "settle") { await write("settle", [id]); return loadMarkets(); }
+  if (act === "claim") { await claimAndTrack(id); return; }
+  if (act === "void") { await write("void", [id]); return loadMarkets(); }
+});
+
+loadMarkets();
+</script>
+</body>
+</html>
