@@ -135,3 +135,28 @@ token or a mirror.
 ```bash
 GLPASS=<keystore-password> node deploy.mjs
 ```
+
+## Deployed
+
+| | |
+|---|---|
+| Contract (Bradbury, chain 4221) | `0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c` |
+| Explorer | https://explorer-bradbury.genlayer.com/address/0xD5Ac66d80CaA33413502c9bb2eCc4dA9c8F8Cd2c |
+| Deploy tx | `0x870da42a1c8aae414a1d813e61df52fb7f20460545af394b240d114ad3ed2b26` |
+| Live app | https://adebisi1111.github.io/milestone-markets/ |
+| Repository | https://github.com/Adebisi1111/milestone-markets |
+
+Resolved on-chain, both directions, same repository — only the criteria differ:
+
+| Market | Criteria | Outcome | Tx |
+|---|---|---|---|
+| `milestone-1` | At least one pull request has been merged into this repository. | **YES** | `0xa821e44c41253231fa6d4d174bdaf1b330a2c24ec123aa582b34e55896f5369f` |
+| `milestone-2` | A quantum teleportation module exists at /src/quantum.py with full unit tests. | **NO** | `0x1d29c62ce933ba1519504be57bb7523bbc891763dcc1dbded53973c35f5c425c` |
+
+**Studio Next (chain 61997) is not deployed.** The `genlayer-js` build available
+here exposes no `estimateTransactionFees` / `createFeesDistribution`, and a plain
+`deployContract` to 61997 reverts at the consensus contract
+(`0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575`) because the transaction carries no
+v0.6 fee distribution. That deploy has to be made from the Studio Next web UI,
+which builds the fee envelope client-side.
+
