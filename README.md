@@ -327,12 +327,26 @@ The alternative is not to force it: `emit_transfer` takes
 stdlib warns that value transfers on `accepted` "may lead to undesired results.
 Prefer to use `finalized` (default)." The slow path is the correct one.
 
-**Studio Next (chain 61997) is not deployed.** The `genlayer-js` build available
-here exposes no `estimateTransactionFees` / `createFeesDistribution`, and a plain
-`deployContract` to 61997 reverts at the consensus contract
-(`0xb7278A61aa25c888815aFC32Ad3cC52fF24fE575`) because the transaction carries no
-v0.6 fee distribution. That deploy has to be made from the Studio Next web UI,
-which builds the fee envelope client-side.
+## Hackathon requirements
+
+The portal's requirement list is two lines:
+
+> **Your project must include an Intelligent Contract with:**
+> - Optimistic Democracy consensus
+> - Equivalence Principle
+
+| Requirement | How this contract meets it |
+|---|---|
+| **Optimistic Democracy consensus** | The contract runs on GenLayer Bradbury, whose validators reach agreement through Optimistic Democracy. `resolve` is a consensus-gated write: validators execute the judgement and vote, and a transaction only finalizes once the network accepts it. |
+| **Equivalence Principle** | `resolve` wraps the judgement in `gl.eq_principle.prompt_comparative(_judge, principle)`. Each validator independently fetches the repository and runs the same evaluator prompt; the principle binds the `outcome` they must agree on and leaves only the reasoning prose free. |
+
+The hackathon is the **Testnet Bradbury Hackathon** — Bradbury *is* the target
+network, and the contract above is deployed there.
+
+**Studio Next is not a requirement.** An earlier revision of this README claimed
+it was, and that was wrong — the portal's hackathon page does not mention Studio
+at all. The Studio Next deploy notes are kept below only because the fee-envelope
+finding is a real, useful result.
 
 ## Launching on mainnet
 
