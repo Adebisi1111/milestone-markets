@@ -47,6 +47,57 @@ repository (`owner/name`), the milestone criteria, and a deadline.
 path — no winning staker, no agreeing validators — that locks funds in the
 contract forever.
 
+## The app
+
+Two pages, both deployed on GitHub Pages:
+
+| | |
+|---|---|
+| **Landing** — https://adebisi1111.github.io/milestone-markets/ | what the product is, how a market resolves, the evaluator prompt verbatim, and the proof |
+| **App** — https://adebisi1111.github.io/milestone-markets/app.html | the tool |
+
+The landing does the explaining so the app can stay a tool. The previous
+single-page app is kept in the repo as `index.v1.html` — a one-file revert if the
+older direction is ever preferred.
+
+### What the app does
+
+- **Wallet balance in the nav.** The connected account's GEN, read from the chain
+  and refreshed after every write, so the number on screen is never stale.
+- **A “Your position” panel.** Wallet / staked / claimable / markets, plus a row
+  per market. This is the screen that answers “do I have money waiting?”
+- **Transaction toasts.** Submitted → accepted → failed, with the reason on
+  failure. A failed write is impossible to miss.
+- **Finalization-aware claims.** A claim is an external message, so the GEN
+  arrives on finalization (tens of minutes). The UI says so and watches the
+  balance, rather than presenting a working payout as broken.
+- **Chain guard.** On connect the page switches — or adds — the target chain in
+  the wallet, so a user on the wrong network is corrected *before* they sign.
+- **Loading skeletons**, not a text flash.
+
+### Design
+
+One design system, declared as custom properties at the top of both pages: a
+near-black surface scale, a violet→mint accent, a radius scale (8/12/18) and a
+type scale with an uppercase micro-label tier. The wordmark is an original SVG
+mark — a stepped path from a start node to a milestone node — not initials in a
+coloured square.
+
+No CSS framework and no build step: each page is a single self-contained file.
+
+### The frontend asks the wallet to sign
+
+Verified with a mock EIP-1193 provider injected before page load:
+
+```
+wallet calls: ["eth_accounts", "eth_chainId", "eth_sendTransaction"]
+```
+
+`eth_requestAccounts` and `wallet_switchEthereumChain` fire on *connect*, so they
+prove nothing about a transaction. `eth_sendTransaction` is the assertion that
+matters. The page also does not navigate away, and there is no link to a Studio
+deploy UI anywhere in it.
+
 ## The evaluator prompt
 
 Sent to every validator, verbatim, with the repository digest and the criteria:
@@ -170,6 +221,20 @@ budget; the digest degrades to `(commits could not be fetched)` and the verdict
 falls back to whatever evidence did arrive. A production deployment would use a
 token or a mirror.
 
+## Run it locally
+
+Both pages are static and the app talks to the chain directly, so there is no
+backend and no build step:
+
+```bash
+python3 -m http.server 8899
+# http://127.0.0.1:8899/            -> landing
+# http://127.0.0.1:8899/app.html    -> app
+```
+
+Reads work with no wallet. Writes need a browser wallet on the target chain with
+GEN for gas.
+
 ## Deploy
 
 ```bash
@@ -195,8 +260,9 @@ on-chain sha256: 932b4bb405a92e15
 repo     sha256: 932b4bb405a92e15
 ```
 
-Reads confirm live state: `getCount` = 1, `milestone-1` `OPEN` on
-`genlayerlabs/genlayer-js`, and `contractBalance` = 0 (no stakes yet).
+Reads confirm live state: `getCount` = **2**, `milestone-1` **OPEN** on
+`genlayerlabs/genlayer-js`, `milestone-2` **SETTLED / YES** (0.8 GEN pool), and
+`contractBalance` = **0** — the payout emptied it.
 
 The explorer path is `/address/` (verified 200); `/contract/` returns 404.
 
@@ -270,13 +336,14 @@ which builds the fee envelope client-side.
 
 ## Launching on mainnet
 
-`index.html` has exactly one chain-specific block. To launch:
+`app.html` has exactly one chain-specific block. To launch:
 
 1. set `NETWORK = "mainnet"`
 2. fill in the `mainnet` entry — `chainId`, `rpcUrl`, `explorer`, `contract`
 
 Nothing else in the file names a network, an RPC, an explorer or an address, so
-those two edits are the whole change.
+those two edits are the whole change. (`index.html` is the landing page and has
+no chain config at all.)
 
 The SDK ships **no mainnet chain definition** (it exports only `localnet`,
 `studionet`, `testnetAsimov`, `testnetBradbury`), so `chainFor()` builds the
@@ -313,5 +380,10 @@ production version would pay the resolver a cut of the pool.
 - **The frontend asks the wallet to sign.** Verified with a mock EIP-1193
   provider injected before page load: `eth_sendTransaction` is requested, the
   page does not navigate away, and there is no link to a Studio deploy UI.
+- **The app shows the real balance.** Connected against the live contract, the
+  nav reads 29.6624 GEN from the chain and the position panel computes wallet /
+  staked / claimable from on-chain positions.
 - **27 direct-mode tests**, with the two fund-safety guards mutation-checked.
 - **Deployed source == published source**, pinned by sha256.
+- **No layout overflow or element overlap** at 1280px, checked programmatically
+  rather than by eye.
