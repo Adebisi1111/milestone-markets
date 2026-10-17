@@ -327,27 +327,6 @@ The alternative is not to force it: `emit_transfer` takes
 stdlib warns that value transfers on `accepted` "may lead to undesired results.
 Prefer to use `finalized` (default)." The slow path is the correct one.
 
-## Hackathon requirements
-
-The portal's requirement list is two lines:
-
-> **Your project must include an Intelligent Contract with:**
-> - Optimistic Democracy consensus
-> - Equivalence Principle
-
-| Requirement | How this contract meets it |
-|---|---|
-| **Optimistic Democracy consensus** | The contract runs on GenLayer Bradbury, whose validators reach agreement through Optimistic Democracy. `resolve` is a consensus-gated write: validators execute the judgement and vote, and a transaction only finalizes once the network accepts it. |
-| **Equivalence Principle** | `resolve` wraps the judgement in `gl.eq_principle.prompt_comparative(_judge, principle)`. Each validator independently fetches the repository and runs the same evaluator prompt; the principle binds the `outcome` they must agree on and leaves only the reasoning prose free. |
-
-The hackathon is the **Testnet Bradbury Hackathon** — Bradbury *is* the target
-network, and the contract above is deployed there.
-
-**Studio Next is not a requirement.** An earlier revision of this README claimed
-it was, and that was wrong — the portal's hackathon page does not mention Studio
-at all. The Studio Next deploy notes are kept below only because the fee-envelope
-finding is a real, useful result.
-
 ## Launching on mainnet
 
 `app.html` has exactly one chain-specific block. To launch:
