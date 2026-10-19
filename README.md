@@ -53,8 +53,8 @@ Two pages, both deployed on GitHub Pages:
 
 | | |
 |---|---|
-| **Landing** — https://adebisi1111.github.io/milestone-markets/ | what the product is, how a market resolves, the evaluator prompt verbatim, and the proof |
-| **App** — https://adebisi1111.github.io/milestone-markets/app.html | the tool |
+| **Landing** — https://milestone-markets.vercel.app/ | what the product is, how a market resolves, the evaluator prompt verbatim, and the proof |
+| **App** — https://milestone-markets.vercel.app/app.html | the tool |
 
 The landing does the explaining so the app can stay a tool. The previous
 single-page app is kept in the repo as `index.v1.html` — a one-file revert if the
@@ -247,8 +247,9 @@ GLPASS=<keystore-password> node deploy.mjs
 |---|---|
 | Contract (Bradbury, chain 4221) | `0x203F67178a7B25803854D179d72Bf40Cfcdc2c88` |
 | Explorer | https://explorer-bradbury.genlayer.com/address/0x203F67178a7B25803854D179d72Bf40Cfcdc2c88 |
-| Live app | https://adebisi1111.github.io/milestone-markets/app.html |
-| Landing | https://adebisi1111.github.io/milestone-markets/ |
+| Live app (Vercel) | https://milestone-markets.vercel.app/app.html |
+| Landing (Vercel) | https://milestone-markets.vercel.app/ |
+| GitHub Pages (mirror) | https://adebisi1111.github.io/milestone-markets/app.html |
 | Repository | https://github.com/Adebisi1111/milestone-markets |
 
 **Deployed source == published source.** `genlayer-js getContractCode` on the
