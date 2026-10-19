@@ -272,9 +272,11 @@ Reads confirm live state (`verify_all.mjs`, re-run 2026-10-19): `getCount` =
 | `milestone-4` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.1 GEN | claimed — tester-path check |
 
 Every market is terminal and every claim has been made, so 1.7 GEN went in and
-1.7 GEN came out and `contractBalance` returns to **0**. (A claim's GEN moves on
-*finalization*, not on acceptance: a balance read a few minutes after a claim
-still shows the value in the contract on a payout that is working correctly.)
+1.7 GEN came out. `contractBalance` reads **0** once the last payout finalizes —
+it shows 0.1 GEN while `milestone-4`'s claim is still finalizing. (A claim's GEN
+moves on *finalization*, not on acceptance: a balance read a few minutes after a
+claim still shows the value in the contract on a payout that is working
+correctly.)
 
 `milestone-4` is a small (0.1 GEN) market opened to confirm the documented tester
 path completes in one sitting — create, stake, cross the deadline, resolve,
