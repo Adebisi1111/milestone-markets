@@ -262,17 +262,24 @@ repo     sha256: 932b4bb405a92e15
 ```
 
 Reads confirm live state (`verify_all.mjs`, re-run 2026-10-19): `getCount` =
-**3**, `contractBalance` = **0**:
+**4**:
 
-| Market | Repo | Status | Outcome | Pool |
-|---|---|---|---|---|
-| `milestone-1` | `genlayerlabs/genlayer-js` | OPEN (no stakes) | — | 0 |
-| `milestone-2` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.8 GEN |
-| `milestone-3` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.8 GEN |
+| Market | Repo | Status | Outcome | Pool | Note |
+|---|---|---|---|---|---|
+| `milestone-1` | `genlayerlabs/genlayer-js` | OPEN (no stakes) | — | 0 | unstaked OPEN path |
+| `milestone-2` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.8 GEN | claimed |
+| `milestone-3` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.8 GEN | claimed |
+| `milestone-4` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.1 GEN | claimed — tester-path check |
 
-Both settled markets were **claimed**, so 1.6 GEN went in and 1.6 GEN came out
-and the contract balance is 0. Every staker's position is settled — nothing is
-stranded and no winner is left waiting.
+Every market is terminal and every claim has been made, so 1.7 GEN went in and
+1.7 GEN came out and `contractBalance` returns to **0**. (A claim's GEN moves on
+*finalization*, not on acceptance: a balance read a few minutes after a claim
+still shows the value in the contract on a payout that is working correctly.)
+
+`milestone-4` is a small (0.1 GEN) market opened to confirm the documented tester
+path completes in one sitting — create, stake, cross the deadline, resolve,
+settle, claim. It resolved YES with a reasoning line citing a real merged pull
+request: the same evidence the other markets were judged on.
 
 `milestone-1` is a deliberately unstaked market created to exercise the OPEN
 path; with no stake, settling it would VOID, so no funds are involved either way.
@@ -318,13 +325,13 @@ sides, on this contract, with two distinct funded accounts:
 | `claim` by B | emitted an external message `{recipient: B, value: 0.8e18, onAcceptance: false}` |
 
 **The deployer's position, stated plainly.** The main wallet was used both to
-deploy and as staker A, so it staked 0.3 GEN on the losing NO side of both
-settled markets — 0.6 GEN, paid to the winners. It holds **no claimable balance
-and no pending withdrawal** on this contract: `getStake` returns 0.3 on the
-settled markets and `previewPayout` returns 0 for it, because the NO side lost.
-It was never registered as a judge, an oracle or a resolver. A production run
-would use a separate counterparty account so the deployer only ever pays fees;
-here the losing stake is the honest way to give the pool a second side.
+deploy and as a staker, so it appears as a participant: it staked 0.3 GEN on the
+losing NO side of `milestone-2` and `milestone-3` (0.6 GEN, paid to the winners)
+and 0.1 GEN on the winning YES side of `milestone-4` (returned to it on claim).
+It holds **no pending withdrawal** on any market, and it was never registered as
+a judge, an oracle or a resolver. A production run would use a separate
+counterparty account so the deployer only ever pays fees; here the losing stake
+is the honest way to give a pool a second side.
 
 Then, once the claim transaction reached `FINALIZED`:
 
@@ -394,7 +401,8 @@ production version would pay the resolver a cut of the pool.
   provider injected before page load: `eth_sendTransaction` is requested, the
   page does not navigate away, and there is no link to a Studio deploy UI.
 - **The app shows the real balance.** Connected against the live contract, the
-  nav reads 29.6624 GEN from the chain and the position panel computes wallet /
+  nav reads the connected account's live GEN balance from the chain and the
+  position panel computes wallet /
   staked / claimable from on-chain positions.
 - **27 direct-mode tests**, with the two fund-safety guards mutation-checked.
 - **Deployed source == published source**, pinned by sha256.
