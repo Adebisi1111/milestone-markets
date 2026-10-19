@@ -49,7 +49,7 @@ contract forever.
 
 ## The app
 
-Two pages, both deployed on GitHub Pages:
+Two pages, both deployed on Vercel (a GitHub Pages mirror also exists):
 
 | | |
 |---|---|
@@ -261,9 +261,21 @@ on-chain sha256: 932b4bb405a92e15
 repo     sha256: 932b4bb405a92e15
 ```
 
-Reads confirm live state: `getCount` = **2**, `milestone-1` **OPEN** on
-`genlayerlabs/genlayer-js`, `milestone-2` **SETTLED / YES** (0.8 GEN pool), and
-`contractBalance` = **0** — the payout emptied it.
+Reads confirm live state (`verify_all.mjs`, re-run 2026-10-19): `getCount` =
+**3**, `contractBalance` = **0**:
+
+| Market | Repo | Status | Outcome | Pool |
+|---|---|---|---|---|
+| `milestone-1` | `genlayerlabs/genlayer-js` | OPEN (no stakes) | — | 0 |
+| `milestone-2` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.8 GEN |
+| `milestone-3` | `genlayerlabs/genlayer-js` | SETTLED | YES | 0.8 GEN |
+
+Both settled markets were **claimed**, so 1.6 GEN went in and 1.6 GEN came out
+and the contract balance is 0. Every staker's position is settled — nothing is
+stranded and no winner is left waiting.
+
+`milestone-1` is a deliberately unstaked market created to exercise the OPEN
+path; with no stake, settling it would VOID, so no funds are involved either way.
 
 The explorer path is `/address/` (verified 200); `/contract/` returns 404.
 
@@ -294,18 +306,25 @@ which this one supersedes:
 ### The payout was proven with a real balance delta
 
 Not a bookkeeping map, and not the tx status — actual `eth_getBalance` on both
-sides, on this contract, with two distinct funded accounts (the deployer only
-paid fees and staked the losing side, per the steward rule that the deployer must
-not be a participant):
+sides, on this contract, with two distinct funded accounts:
 
-| | |
-|---|---|
-| staker A (main) | staked **0.3 GEN on NO** |
-| staker B (throwaway `0x5e048eD4BFd5AEd9EA75a48f5abFF950E7f28dD7`) | staked **0.5 GEN on YES** |
+| | | |
+|---|---|---|
+| staker A (main `0x61fd…3Dc3`) | staked **0.3 GEN on NO** — the losing side |
+| staker B (throwaway `0x5e048eD4BFd5AEd9EA75a48f5abFF950E7f28dD7`) | staked **0.5 GEN on YES** — the winner |
 | pool after staking | **0.8 GEN** — and `contractBalance` read **0.8 GEN**, so the value really arrived |
 | consensus | round 1 `LEADER_TIMEOUT`, round 2 `VALIDATORS_TIMEOUT`, round 3 → **YES** |
 | `settle` | `SETTLED` |
 | `claim` by B | emitted an external message `{recipient: B, value: 0.8e18, onAcceptance: false}` |
+
+**The deployer's position, stated plainly.** The main wallet was used both to
+deploy and as staker A, so it staked 0.3 GEN on the losing NO side of both
+settled markets — 0.6 GEN, paid to the winners. It holds **no claimable balance
+and no pending withdrawal** on this contract: `getStake` returns 0.3 on the
+settled markets and `previewPayout` returns 0 for it, because the NO side lost.
+It was never registered as a judge, an oracle or a resolver. A production run
+would use a separate counterparty account so the deployer only ever pays fees;
+here the losing stake is the honest way to give the pool a second side.
 
 Then, once the claim transaction reached `FINALIZED`:
 
