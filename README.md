@@ -245,8 +245,8 @@ GLPASS=<keystore-password> node deploy.mjs
 
 | | |
 |---|---|
-| Contract (Bradbury, chain 4221) | `0x203F67178a7B25803854D179d72Bf40Cfcdc2c88` |
-| Explorer | https://explorer-bradbury.genlayer.com/address/0x203F67178a7B25803854D179d72Bf40Cfcdc2c88 |
+| Contract (Bradbury, chain 4221) | `0x28b5DEB63eB84816a6c392Fd5949DC68170d5951` |
+| Explorer | https://explorer-bradbury.genlayer.com/address/0x28b5DEB63eB84816a6c392Fd5949DC68170d5951 |
 | Live app (Vercel) | https://milestone-markets.vercel.app/app.html |
 | Landing (Vercel) | https://milestone-markets.vercel.app/ |
 | GitHub Pages (mirror) | https://adebisi1111.github.io/milestone-markets/app.html |

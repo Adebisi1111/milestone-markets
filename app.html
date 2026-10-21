@@ -369,9 +369,12 @@ const el = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 function fmtGen(wei) {
-  const n = Number(wei) / 1e18;
-  if (!isFinite(n) || n === 0) return "0";
-  return n.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+  const w = typeof wei === "bigint" ? wei : BigInt(wei || 0);
+  if (w === 0n) return "0";
+  const whole = w / 1000000000000000000n;
+  const frac = w % 1000000000000000000n;
+  const fracStr = frac.toString().padStart(18, "0").slice(0, 4).replace(/0+$/, "");
+  return whole.toString() + (fracStr ? "." + fracStr : "");
 }
 const clock = () => new Date().toISOString().slice(11, 19);
 
@@ -498,7 +501,7 @@ function parseMarket(row) {
     outcome: o.outcome || "", deadline: Number(o.deadline || 0),
     pool: o.pool != null ? String(o.pool) : "0",
     reasoning: o.reasoning || "",
-    yesPool: Number(o.yes_pool || 0), noPool: Number(o.no_pool || 0),
+    yesPool: String(o.yes_pool || "0"), noPool: String(o.no_pool || "0"),
   };
 }
 
@@ -508,7 +511,7 @@ function parsePositions(pos) {
     if (!p) continue;
     const bits = p.split(":");
     if (bits.length < 3) continue;
-    const who = bits[0], side = bits[1], amt = Number(bits[2]) || 0;
+    const who = bits[0], side = bits[1], amt = bits[2] || "0";
     if (side === "YES") out.yes += amt;
     else if (side === "NO") out.no += amt;
     if (account && who.toLowerCase() === account.toLowerCase()) out.mine[side] += amt;
@@ -531,13 +534,18 @@ async function loadMarkets() {
       return;
     }
     let html = "";
-    let total = 0;
+    let total = 0n;
     const mine = [];
-    for (let i = count; i >= 1; i--) {
-      const id = "milestone-" + i;
+    // Parallel fetch: read all markets at once instead of sequentially.
+    const marketIds = [];
+    for (let i = count; i >= 1; i--) marketIds.push("milestone-" + i);
+    const marketData = await Promise.all(marketIds.map(async (id) => {
       const m = parseMarket(await client.readContract({ address: CFG.contract, functionName: "getMarket", args: [id] }));
       const pos = parsePositions(await client.readContract({ address: CFG.contract, functionName: "getPositions", args: [id] }));
-      total += Number(m.pool) || 0;
+      return { id, m, pos };
+    }));
+    for (const { id, m, pos } of marketData) {
+      total += BigInt(m.pool || "0");
 
       // What this wallet holds in this market, and what it can take out now.
       const myStake = pos.mine.YES + pos.mine.NO;
@@ -691,9 +699,19 @@ async function write(fn, args, value = 0n) {
     const hash = await client.writeContract({ address: CFG.contract, functionName: fn, args, value, gasLimit: GAS });
     log(fn + " sent", hash);
     const rc = await client.waitForTransactionReceipt({ hash, retries: 120, interval: 5000 });
-    log(fn + " status " + (rc && rc.status), hash);
+    const st = rc ? (rc.statusName || rc.status) : null;
+    log(fn + " status " + st, hash);
     t.remove();
-    toast(label + " accepted", "Transaction " + String(hash).slice(0, 10) + "… is on-chain.", "ok");
+    // Validate successful execution: status 5 (ACCEPTED) or 7 (FINALIZED)
+    const ok = rc && (rc.status === 5 || rc.status === 7 || rc.statusName === "ACCEPTED" || rc.statusName === "FINALIZED");
+    if (!ok) {
+      const msg = "Transaction did not finalize successfully (status: " + st + ").";
+      log(fn + " not finalized: " + msg, hash);
+      toast(label + " not finalized", msg, "err");
+      await refreshBalance();
+      return null;
+    }
+    toast(label + " finalized", "Transaction " + String(hash).slice(0, 10) + "… finalized on-chain.", "ok");
     await refreshBalance();
     return rc;
   } catch (e) {

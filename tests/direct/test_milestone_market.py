@@ -186,9 +186,8 @@ def test_stake_yes_and_no(direct_vm, direct_deploy, direct_alice, direct_bob):
     assert m["yes_pool"] == 100
     assert m["no_pool"] == 50
 
-    pos = c.getPositions(mid)
-    assert f"{to_hex(direct_alice)}:YES:100" in pos
-    assert f"{to_hex(direct_bob)}:NO:50" in pos
+    assert c.getStake(mid, to_hex(direct_alice)) == "100"
+    assert c.getStake(mid, to_hex(direct_bob)) == "50"
     assert c.getStake(mid, to_hex(direct_alice)) == "100"
 
 
@@ -257,8 +256,8 @@ def test_resolve_no_when_never_merged(direct_vm, direct_deploy, direct_alice):
     _mock_github(direct_vm, commits=[], pulls=[])
     _verdict(direct_vm, "NO", "No matching pull request was ever merged.")
 
-    assert c.resolve(mid) == "NO"
-    assert row(c, mid)["outcome"] == "NO"
+    with direct_vm.expect_revert("No commits found before deadline"):
+        c.resolve(mid)
 
 
 def test_resolve_is_not_repeatable(direct_vm, direct_deploy, direct_alice):
@@ -575,3 +574,137 @@ def test_preview_payout_is_zero_while_open(direct_vm, direct_deploy, direct_alic
     mid = _open(direct_vm, c, direct_alice)
     stake(direct_vm, c, direct_alice, mid, "YES", 100)
     assert c.previewPayout(mid, to_hex(direct_alice)) == "0"
+
+
+# ------------------------------------------------------------------ new: steward fixes
+
+def test_claim_rejects_attached_gen(direct_vm, direct_deploy, direct_alice, direct_bob):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
+
+    direct_vm.warp(AFTER)
+    _mock_github(direct_vm)
+    _verdict(direct_vm, "YES")
+    c.resolve(mid)
+    c.settle(mid)
+
+    # claim with attached GEN should revert
+    direct_vm.sender = direct_alice
+    direct_vm.value = 1
+    with direct_vm.expect_revert("does not accept GEN"):
+        c.claim(mid)
+    direct_vm.value = 0
+
+
+def test_fail_closed_on_missing_commits(direct_vm, direct_deploy, direct_alice):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+
+    direct_vm.warp(AFTER)
+    _mock_github(direct_vm, commits=[])
+    _verdict(direct_vm, "NO")
+
+    with direct_vm.expect_revert("No commits found before deadline"):
+        c.resolve(mid)
+
+
+def test_payout_conservation(direct_vm, direct_deploy, direct_alice, direct_bob):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+    # 3 stakes on YES, 1 on NO
+    stake(direct_vm, c, direct_alice, mid, "YES", 100)
+    stake(direct_vm, c, direct_bob, mid, "YES", 200)
+    # bob stakes again (same wallet, different amount)
+    stake(direct_vm, c, direct_bob, mid, "NO", 50)
+
+    direct_vm.warp(AFTER)
+    _mock_github(direct_vm)
+    _verdict(direct_vm, "YES")
+    c.resolve(mid)
+    c.settle(mid)
+
+    # alice claims
+    direct_vm.sender = direct_alice
+    direct_vm.value = 0
+    p1 = c.claim(mid)
+    # bob claims
+    direct_vm.sender = direct_bob
+    direct_vm.value = 0
+    p2 = c.claim(mid)
+
+    total_paid = int(p1) + int(p2)
+    m = row(c, mid)
+    assert total_paid == m["pool"], f"total_paid={total_paid} != pool={m['pool']}"
+
+
+# ------------------------------------------------------------------ adversarial: historical evidence
+
+def test_late_delivery_rejected(direct_vm, direct_deploy, direct_alice):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+
+    direct_vm.warp(AFTER)
+    # commit dated AFTER deadline
+    _mock_github(
+        direct_vm,
+        commits=[{
+            "sha": "late123",
+            "commit": {
+                "author": {"date": "2026-02-15T10:00:00Z"},
+                "message": "feat: late delivery",
+            },
+        }],
+        pulls=[{
+            "number": 99,
+            "state": "closed",
+            "merged_at": "2026-02-15T10:00:00Z",
+            "title": "Late PR",
+        }],
+    )
+    _verdict(direct_vm, "NO", "Merged after deadline.")
+    assert c.resolve(mid) == "NO"
+
+
+def test_github_outage_fails_closed(direct_vm, direct_deploy, direct_alice):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+
+    direct_vm.warp(AFTER)
+    # Mock commits to return 500 error
+    direct_vm.mock_web(
+        r".*api\.github\.com/repos/[^/]+/[^/]+/commits.*",
+        {"status": 500, "body": "Internal Server Error"},
+    )
+    _verdict(direct_vm, "NO")
+    with direct_vm.expect_revert("could not be fetched"):
+        c.resolve(mid)
+
+
+def test_malformed_commits_fails_closed(direct_vm, direct_deploy, direct_alice):
+    direct_vm.warp(BEFORE)
+    c = direct_deploy("contracts/milestone_market.py")
+    mid = _open(direct_vm, c, direct_alice)
+
+    direct_vm.warp(AFTER)
+    direct_vm.mock_web(
+        r".*api\.github\.com/repos/[^/]+/[^/]+/commits.*",
+        {"status": 200, "body": "not json at all"},
+    )
+    direct_vm.mock_web(
+        r".*api\.github\.com/repos/[^/]+/[^/]+/pulls.*",
+        {"status": 200, "body": "[]"},
+    )
+    direct_vm.mock_web(
+        r".*api\.github\.com/repos/[^/]+/[^/]+/git/trees/.*",
+        {"status": 200, "body": '{"tree": []}'},
+    )
+    # commits mock returns non-JSON; should fail closed
+    with direct_vm.expect_revert():
+        c.resolve(mid)

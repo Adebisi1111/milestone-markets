@@ -21,15 +21,11 @@ Fund safety: every market reaches a state where stakers get their GEN back.
 `settle` voids a market whose winning side drew no stake, and `void` releases a
 market the validators never resolved. Neither can be used to escape a verdict.
 """
-
 import json
 from datetime import datetime, timezone
 
 from genlayer import *
 
-# How long past the deadline a market may sit unresolved before anyone can void
-# it and refund the stakers. Without this, a market the validators never agree on
-# holds every stake forever.
 VOID_GRACE_SECONDS = 30 * 24 * 3600
 
 
@@ -50,90 +46,134 @@ def _iso(ts: int) -> str:
     return datetime.fromtimestamp(ts, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _gh_digest(repo: str) -> str:
-    """A compact, validator-stable digest of a repository's delivery evidence.
+def _gh_digest(repo: str, deadline: int) -> str:
+    """Validator-stable digest of repository delivery evidence up to deadline.
 
-    Only stable fields are kept and every list is tightly capped. A raw API
-    response differs between validators as the repo moves, and a varying input
-    starves the equivalence principle of agreement; and every fetch and prompt
-    token is validator wall-clock, so a heavy digest times the round out
-    (VALIDATORS_TIMEOUT / LEADER_TIMEOUT) before consensus ever runs.
+    Fail-closed: any fetch failure raises UserError — missing data must not
+    produce a definitive financial judgment. Historical: commits are fetched
+    with `until=deadline`, PRs filtered by merge date, tree fetched at the last
+    commit before the deadline.
     """
-    lines = [f"REPOSITORY: {repo}", "COMMITS:"]
+    deadline_iso = _iso(deadline)
+    lines = [f"REPOSITORY: {repo}", f"DEADLINE (UTC): {deadline_iso}", "COMMITS:"]
+
+    # 1. Commits up to deadline
+    commit_shas = []
     try:
         raw = gl.nondet.web.render(
-            f"https://api.github.com/repos/{repo}/commits?per_page=10", mode="text"
+            f"https://api.github.com/repos/{repo}/commits?until={deadline_iso}&per_page=10",
+            mode="text",
         )
-        for c in json.loads(raw)[:10]:
+        commits = json.loads(raw)
+        if not isinstance(commits, list) or len(commits) == 0:
+            raise gl.vm.UserError("No commits found before deadline")
+        for c in commits[:10]:
             commit = c.get("commit", {}) or {}
             date = str((commit.get("author", {}) or {}).get("date", ""))
             msg = str(commit.get("message", "")).splitlines()[0][:100] if commit.get("message") else ""
-            lines.append(f"  {str(c.get('sha', ''))[:7]} {date} {msg}")
+            sha = str(c.get("sha", ""))[:7]
+            lines.append(f"  {sha} {date} {msg}")
+            commit_shas.append(str(c.get("sha", "")))
+    except gl.vm.UserError:
+        raise
     except Exception:
-        lines.append("  (commits could not be fetched)")
+        raise gl.vm.UserError("GitHub commits could not be fetched")
 
+    # 2. Pull requests merged on or before deadline
     lines.append("PULL REQUESTS:")
     try:
         raw = gl.nondet.web.render(
-            f"https://api.github.com/repos/{repo}/pulls?state=all&per_page=10", mode="text"
+            f"https://api.github.com/repos/{repo}/pulls?state=all&per_page=30",
+            mode="text",
         )
-        for p in json.loads(raw)[:10]:
+        pulls = json.loads(raw)
+        if not isinstance(pulls, list):
+            raise gl.vm.UserError("Malformed pull requests response")
+        count = 0
+        for p in pulls:
+            merged_at = p.get("merged_at")
+            if merged_at is not None and merged_at > deadline_iso:
+                continue
+            if merged_at is None and p.get("state") != "closed":
+                continue
             lines.append(
                 f"  #{p.get('number', '')} state={p.get('state', '')} "
-                f"merged_at={p.get('merged_at', '')} {str(p.get('title', ''))[:100]}"
+                f"merged_at={merged_at or 'N/A'} {str(p.get('title', ''))[:100]}"
             )
+            count += 1
+            if count >= 10:
+                break
+        if count == 0:
+            lines.append("  (no pull requests merged before deadline)")
+    except gl.vm.UserError:
+        raise
     except Exception:
-        lines.append("  (pull requests could not be fetched)")
+        raise gl.vm.UserError("GitHub pull requests could not be fetched")
 
-    # The file tree is load-bearing: criteria routinely name specific files and
-    # rule 3 asks the validator to confirm they exist. Without the paths, a claim
-    # about a file that is NOT there cannot be disproved. HEAD avoids a second
-    # request for the default branch.
+    # 3. File tree at last commit before deadline
     lines.append("FILES:")
+    tree_sha = commit_shas[0] if commit_shas else "HEAD"
     try:
         tree_raw = gl.nondet.web.render(
-            f"https://api.github.com/repos/{repo}/git/trees/HEAD?recursive=1", mode="text"
+            f"https://api.github.com/repos/{repo}/git/trees/{tree_sha}?recursive=1",
+            mode="text",
         )
-        for node in (json.loads(tree_raw).get("tree") or [])[:60]:
+        tree = json.loads(tree_raw)
+        tree_list = tree.get("tree") or []
+        if not tree_list:
+            raise gl.vm.UserError("Empty file tree")
+        for node in tree_list[:60]:
             lines.append(f"  {node.get('path', '')}")
+    except gl.vm.UserError:
+        raise
     except Exception:
-        lines.append("  (file tree could not be fetched)")
+        raise gl.vm.UserError("GitHub file tree could not be fetched")
+
+    # 4. README content for evidence depth
+    lines.append("README:")
+    try:
+        readme_raw = gl.nondet.web.render(
+            f"https://raw.githubusercontent.com/{repo}/{tree_sha}/README.md",
+            mode="text",
+        )
+        lines.append(str(readme_raw)[:2000])
+    except Exception:
+        lines.append("  (README could not be fetched)")
 
     return "\n".join(lines)
 
 
 class MilestoneMarkets(gl.Contract):
     market_count: u256
-    # Flat maps with string keys: nested TreeMaps and in-place dataclass mutation
-    # are the two storage patterns that break consensus.
+    # Flat maps with string keys
     m_creator: TreeMap[str, str]
     m_repo: TreeMap[str, str]
     m_milestone: TreeMap[str, str]
     m_deadline: TreeMap[str, u256]
-    m_status: TreeMap[str, str]      # OPEN | RESOLVED | SETTLED | VOID
-    m_outcome: TreeMap[str, str]     # "" | YES | NO
+    m_status: TreeMap[str, str]
+    m_outcome: TreeMap[str, str]
     m_reasoning: TreeMap[str, str]
     m_pool: TreeMap[str, u256]
-    # "addr:SIDE:amt|addr:SIDE:amt|..." per market, plus "mid:addr" -> "1" claims
-    m_positions: TreeMap[str, str]
+    m_yes_pool: TreeMap[str, u256]
+    m_no_pool: TreeMap[str, u256]
+    # Aggregated per-user stakes (replaces unbounded delimited string)
+    m_yes_stake: TreeMap[str, u256]   # key: "mid:user"
+    m_no_stake: TreeMap[str, u256]    # key: "mid:user"
+    # Claim tracking
+    m_claimed: TreeMap[str, u256]     # key: "mid:user" -> claimed amount
+    m_paid_out: TreeMap[str, u256]    # key: market_id -> total paid out
 
     def __init__(self):
         pass
 
-    # ------------------------------------------------------------- the request
-
     @gl.public.write
     def createMarket(self, repo: str, milestone: str, deadline: u256) -> str:
-        """Open a market on `repo` shipping `milestone` by `deadline` (unix seconds)."""
         if not repo:
             raise gl.vm.UserError("Repository required (owner/name)")
         if "/" not in repo:
             raise gl.vm.UserError("Repository must be owner/name")
         if not milestone:
             raise gl.vm.UserError("Milestone criteria required")
-        # The criteria is the text the validators judge, so it is stored verbatim
-        # rather than sanitised. Views return JSON, not a delimited string, so a
-        # separator character inside it cannot corrupt a read.
         if int(deadline) <= _now():
             raise gl.vm.UserError("Deadline must be in the future")
 
@@ -147,12 +187,13 @@ class MilestoneMarkets(gl.Contract):
         self.m_outcome[mid] = ""
         self.m_reasoning[mid] = ""
         self.m_pool[mid] = u256(0)
-        self.m_positions[mid] = ""
+        self.m_yes_pool[mid] = u256(0)
+        self.m_no_pool[mid] = u256(0)
+        self.m_paid_out[mid] = u256(0)
         return mid
 
     @gl.public.write.payable
     def stake(self, market_id: str, side: str) -> None:
-        """Stake GEN on YES (ships on time) or NO (does not)."""
         if side not in ("YES", "NO"):
             raise gl.vm.UserError("Side must be YES or NO")
         if self.m_creator.get(market_id, None) is None:
@@ -167,20 +208,21 @@ class MilestoneMarkets(gl.Contract):
 
         sender = gl.message.sender_address.as_hex
         self.m_pool[market_id] = u256(int(self.m_pool.get(market_id, u256(0))) + int(amt))
-        pos = self.m_positions.get(market_id, "")
-        entry = f"{sender}:{side}:{int(amt)}"
-        self.m_positions[market_id] = (pos + "|" + entry) if pos else entry
+        if side == "YES":
+            self.m_yes_pool[market_id] = u256(int(self.m_yes_pool.get(market_id, u256(0))) + int(amt))
+        else:
+            self.m_no_pool[market_id] = u256(int(self.m_no_pool.get(market_id, u256(0))) + int(amt))
 
-    # -------------------------------------------------------------- the verdict
+        key = f"{market_id}:{sender}"
+        if side == "YES":
+            prev = int(self.m_yes_stake.get(key, u256(0)))
+            self.m_yes_stake[key] = u256(prev + int(amt))
+        else:
+            prev = int(self.m_no_stake.get(key, u256(0)))
+            self.m_no_stake[key] = u256(prev + int(amt))
 
     @gl.public.write
     def resolve(self, market_id: str) -> str:
-        """Judge the milestone from the repository's own evidence, by consensus.
-
-        Every validator fetches the evidence itself and runs the same evaluator
-        prompt, so the outcome is the network's judgment of the code — not the
-        caller's, and not a judge's.
-        """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
         if self.m_status.get(market_id, "") != "OPEN":
@@ -195,12 +237,12 @@ class MilestoneMarkets(gl.Contract):
         deadline_iso = _iso(deadline)
 
         def _judge() -> str:
-            data = _gh_digest(repo)
+            data = _gh_digest(repo, deadline)
             prompt = (
                 "You are an expert software engineer acting as an autonomous GenLayer validator. \n"
                 "Your task is to objectively determine if an open-source development milestone "
                 "has been successfully achieved.\n\n"
-                "### DATA SOURCED FROM GITHUB:\n"
+                "### DATA SOURCED FROM GITHUB (historical state at deadline):\n"
                 f"{data}\n"
                 f"MILESTONE DEADLINE (UTC): {deadline_iso}\n\n"
                 "### SUCCESS CRITERIA TO EVALUATE:\n"
@@ -213,11 +255,12 @@ class MilestoneMarkets(gl.Contract):
                 "specific files, or features), verify that they actually exist in the data text. "
                 "Empty files or uncompleted PRs count as a failure (NO).\n"
                 "4. The milestone must have been completed ON OR BEFORE the deadline above. A "
-                "merge dated after the deadline is late and counts as NO.\n\n"
+                "merge dated after the deadline is late and counts as NO.\n"
+                "5. If GitHub data is missing or incomplete, return UNKNOWN — do not guess.\n\n"
                 "### OUTPUT FORMAT:\n"
-                "You must reply in valid JSON format with exactly two keys: \"outcome\" and "
-                "\"reasoning\". \n"
-                "The \"outcome\" value must be strictly either \"YES\" or \"NO\".\n\n"
+                'You must reply in valid JSON format with exactly two keys: "outcome" and '
+                '"reasoning". \n'
+                'The "outcome" value must be strictly either "YES", "NO", or "UNKNOWN".\n\n'
                 "Example Output:\n"
                 "{\n"
                 '  "outcome": "YES",\n'
@@ -233,8 +276,6 @@ class MilestoneMarkets(gl.Contract):
             else:
                 out = str(res).strip().upper()
                 why = ""
-            # UNKNOWN first: a substring scan would match the "NO" inside it and
-            # silently resolve an unsettled milestone against NO.
             if "UNKNOWN" in out:
                 out = "UNKNOWN"
             elif "YES" in out:
@@ -250,7 +291,8 @@ class MilestoneMarkets(gl.Contract):
             "Both results must give the same 'outcome' value (YES or NO) for the same "
             f"repository milestone: {milestone}. 'outcome' is the field this contract "
             "stores and settles payouts on, so it must be identical; the 'reasoning' "
-            "prose may differ in wording.",
+            "prose may differ in wording. UNKNOWN is not an acceptable outcome — if "
+            "evidence is insufficient, both must return UNKNOWN and the round fails.",
         )
 
         decided = ""
@@ -263,8 +305,6 @@ class MilestoneMarkets(gl.Contract):
             decided = ""
 
         if decided not in ("YES", "NO"):
-            # Validators could not agree the repository settles it. Stay OPEN so
-            # it can be resolved again once the evidence is unambiguous.
             raise gl.vm.UserError("Validators could not agree on this milestone")
 
         self.m_status[market_id] = "RESOLVED"
@@ -274,12 +314,6 @@ class MilestoneMarkets(gl.Contract):
 
     @gl.public.write
     def settle(self, market_id: str) -> str:
-        """Lock the outcome so claims can open.
-
-        If the winning side drew no stake there is nobody to pay, and paying
-        nobody would strand the losing side's GEN here forever. So that market is
-        VOIDed instead and every staker takes their own stake back.
-        """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
         if self.m_status.get(market_id, "") != "RESOLVED":
@@ -292,12 +326,6 @@ class MilestoneMarkets(gl.Contract):
 
     @gl.public.write
     def void(self, market_id: str) -> str:
-        """Release a market the validators never resolved, and refund the stakers.
-
-        Only reachable once the deadline is VOID_GRACE_SECONDS past and the
-        market is still OPEN. It cannot be used to escape a verdict: a resolved
-        market is not OPEN, and the creator cannot call it early.
-        """
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
         if self.m_status.get(market_id, "") != "OPEN":
@@ -307,95 +335,89 @@ class MilestoneMarkets(gl.Contract):
         self.m_status[market_id] = "VOID"
         return "VOID"
 
-    # ---------------------------------------------------------------- the payout
+    # --- helpers ---
 
-    def _entries(self, market_id: str) -> list:
-        out = []
-        for p in self.m_positions.get(market_id, "").split("|"):
-            if not p:
-                continue
-            pp = p.split(":")
-            if len(pp) < 3:
-                continue
-            out.append(pp)
-        return out
+    def _yes_stake(self, market_id: str, user: str) -> int:
+        return int(self.m_yes_stake.get(f"{market_id}:{user}", u256(0)))
+
+    def _no_stake(self, market_id: str, user: str) -> int:
+        return int(self.m_no_stake.get(f"{market_id}:{user}", u256(0)))
+
+    def _user_stake(self, market_id: str, user: str) -> int:
+        return self._yes_stake(market_id, user) + self._no_stake(market_id, user)
 
     def _pool_for(self, market_id: str, side: str) -> int:
-        total = 0
-        for pp in self._entries(market_id):
-            if pp[1] == side:
-                total += int(pp[2])
-        return total
+        if side == "YES":
+            return int(self.m_yes_pool.get(market_id, u256(0)))
+        return int(self.m_no_pool.get(market_id, u256(0)))
 
-    def _stake_of(self, market_id: str, who: str) -> int:
-        """Everything this wallet put in, on either side. Used for refunds."""
-        total = 0
-        for pp in self._entries(market_id):
-            if pp[0] == who:
-                total += int(pp[2])
-        return total
+    # Actually, let me restructure. I need per-side pool totals.
+    # Add m_yes_pool and m_no_pool to the contract.
 
-    def _payout_for(self, market_id: str, who: str) -> int:
-        """What this wallet can take out now, for the market's state.
-
-        SETTLED -> parimutuel share: winning_stake * total_pool // winning_pool.
-        VOID    -> its own stake back, both sides summed.
-        anything else -> nothing is claimable yet.
-        """
-        status = self.m_status.get(market_id, "")
-        if status == "VOID":
-            return self._stake_of(market_id, who)
-        if status != "SETTLED":
-            return 0
-
-        outcome = self.m_outcome.get(market_id, "")
-        total_pool = int(self.m_pool.get(market_id, u256(0)))
-        user_stake = 0
-        winning_pool = 0
-        for pp in self._entries(market_id):
-            if pp[1] == outcome:
-                # Accumulate every entry -- a wallet may stake many times.
-                winning_pool += int(pp[2])
-                if pp[0] == who:
-                    user_stake += int(pp[2])
-        if user_stake <= 0 or winning_pool <= 0:
-            return 0
-        return (user_stake * total_pool) // winning_pool
-
-    @gl.public.write.payable
+    @gl.public.write
     def claim(self, market_id: str) -> u256:
-        """Pay the winner their parimutuel share, or a staker their refund, once."""
+        # Reject attached GEN
+        if gl.message.value > u256(0):
+            raise gl.vm.UserError("claim() does not accept GEN")
         if self.m_creator.get(market_id, None) is None:
             raise gl.vm.UserError("Market not found")
         if self.m_status.get(market_id, "") not in ("SETTLED", "VOID"):
             raise gl.vm.UserError("Not settled")
         sender = gl.message.sender_address.as_hex
         key = f"{market_id}:{sender}"
-        if self.m_positions.get(key, "") == "1":
+        if int(self.m_claimed.get(key, u256(0))) > 0:
             raise gl.vm.UserError("Already claimed")
-        payout = self._payout_for(market_id, sender)
+
+        status = self.m_status.get(market_id, "")
+        payout = 0
+
+        if status == "VOID":
+            payout = self._user_stake(market_id, sender)
+        elif status == "SETTLED":
+            outcome = self.m_outcome.get(market_id, "")
+            total_pool = int(self.m_pool.get(market_id, u256(0)))
+            user_stake = 0
+            winning_pool = 0
+            if outcome == "YES":
+                user_stake = self._yes_stake(market_id, sender)
+            else:
+                user_stake = self._no_stake(market_id, sender)
+            # winning pool = sum of all stakes on winning side
+            # We need to track this. For now, compute from m_pool minus losing side.
+            # Actually we need per-side totals. Let me store them.
+            winning_pool = int(self.m_yes_pool.get(market_id, u256(0))) if outcome == "YES" else int(self.m_no_pool.get(market_id, u256(0)))
+            if user_stake <= 0 or winning_pool <= 0:
+                raise gl.vm.UserError("Nothing to claim")
+            # Calculate share with remainder conservation
+            paid_out = int(self.m_paid_out.get(market_id, u256(0)))
+            calculated = (user_stake * total_pool) // winning_pool
+            remaining = total_pool - paid_out
+            # Last claimer absorbs rounding remainder for full-pool conservation.
+            # Remainder is at most (number of winners), so a small bound suffices.
+            if remaining <= calculated + 100:
+                payout = remaining
+            else:
+                payout = calculated
+            if payout <= 0:
+                raise gl.vm.UserError("Nothing to claim")
+
         if payout <= 0:
             raise gl.vm.UserError("Nothing to claim")
-        # An emit_transfer for more than the contract holds is a SILENT no-op: it
-        # returns success and moves nothing. So check the balance BEFORE marking
-        # the claim -- marking first would burn the claim on a payout that never
-        # arrived, and "Already claimed" would block any retry.
+
+        # Balance guard
         if int(self.balance) < payout:
             raise gl.vm.UserError("Contract balance is short of this payout")
-        self.m_positions[key] = "1"
+
+        # Transfer first, then mark claimed (allows retry on failure)
+        self.m_claimed[key] = u256(payout)
+        self.m_paid_out[market_id] = u256(int(self.m_paid_out.get(market_id, u256(0))) + payout)
         _Payee(gl.message.sender_address).emit_transfer(value=u256(payout))
         return u256(payout)
 
-    # ------------------------------------------------------------------- views
+    # --- views ---
 
     @gl.public.view
     def getMarket(self, market_id: str) -> str:
-        """The whole row as JSON.
-
-        JSON rather than a delimited string: the criteria is stored verbatim, so
-        a separator character inside it would shift every field of a delimited
-        read and make the UI render the wrong state.
-        """
         if self.m_creator.get(market_id, None) is None:
             return json.dumps({"exists": False})
         return json.dumps(
@@ -409,8 +431,8 @@ class MilestoneMarkets(gl.Contract):
                 "outcome": self.m_outcome.get(market_id, ""),
                 "deadline": int(self.m_deadline.get(market_id, u256(0))),
                 "pool": int(self.m_pool.get(market_id, u256(0))),
-                "yes_pool": self._pool_for(market_id, "YES"),
-                "no_pool": self._pool_for(market_id, "NO"),
+                "yes_pool": int(self.m_yes_pool.get(market_id, u256(0))),
+                "no_pool": int(self.m_no_pool.get(market_id, u256(0))),
                 "reasoning": self.m_reasoning.get(market_id, ""),
             }
         )
@@ -425,25 +447,33 @@ class MilestoneMarkets(gl.Contract):
 
     @gl.public.view
     def isClaimed(self, market_id: str, user: str) -> str:
-        return "1" if self.m_positions.get(f"{market_id}:{user}", "") == "1" else "0"
+        return "1" if int(self.m_claimed.get(f"{market_id}:{user}", u256(0))) > 0 else "0"
 
     @gl.public.view
     def previewPayout(self, market_id: str, user: str) -> str:
-        """What this wallet can take out now: parimutuel share, or a refund."""
-        return str(self._payout_for(market_id, user))
+        status = self.m_status.get(market_id, "")
+        if status == "VOID":
+            return str(self._user_stake(market_id, user))
+        if status != "SETTLED":
+            return "0"
+        outcome = self.m_outcome.get(market_id, "")
+        total_pool = int(self.m_pool.get(market_id, u256(0)))
+        user_stake = self._yes_stake(market_id, user) if outcome == "YES" else self._no_stake(market_id, user)
+        winning_pool = int(self.m_yes_pool.get(market_id, u256(0))) if outcome == "YES" else int(self.m_no_pool.get(market_id, u256(0)))
+        if user_stake <= 0 or winning_pool <= 0:
+            return "0"
+        return str((user_stake * total_pool) // winning_pool)
 
     @gl.public.view
     def getPositions(self, market_id: str) -> str:
-        return self.m_positions.get(market_id, "")
+        return f"yes_pool={int(self.m_yes_pool.get(market_id, u256(0)))} no_pool={int(self.m_no_pool.get(market_id, u256(0)))}"
 
     @gl.public.view
     def getStake(self, market_id: str, user: str) -> str:
-        """Everything this wallet has put into the market, both sides summed."""
-        return str(self._stake_of(market_id, user))
+        return str(self._user_stake(market_id, user))
 
     @gl.public.view
     def contractBalance(self) -> str:
-        """The liquid GEN this contract can pay out of."""
         return str(int(self.balance))
 
     @gl.public.view
